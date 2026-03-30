@@ -2,7 +2,7 @@ package starred.skies.odin.features.impl.cheats
 
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
-import com.odtheking.odin.events.GuiEvent
+import com.odtheking.odin.events.ScreenEvent
 import com.odtheking.odin.events.TerminalEvent
 import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.Module
@@ -24,7 +24,7 @@ object AutoTerms : Module(
     private var firstClick = true
 
     init {
-        on<GuiEvent.DrawBackground> {
+        on<ScreenEvent.Render> {
             with (TerminalUtils.currentTerm ?: return@on) {
                 if (firstClick && (System.currentTimeMillis() - lastClickTime < firstClickDelay)) return@on
                 if (System.currentTimeMillis() - lastClickTime < autoDelay) return@on

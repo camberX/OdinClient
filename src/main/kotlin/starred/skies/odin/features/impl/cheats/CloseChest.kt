@@ -1,7 +1,7 @@
 package starred.skies.odin.features.impl.cheats
 
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
-import com.odtheking.odin.events.GuiEvent
+import com.odtheking.odin.events.ScreenEvent
 import com.odtheking.odin.events.core.on
 import com.odtheking.odin.events.core.onReceive
 import com.odtheking.odin.features.Module
@@ -31,14 +31,14 @@ object CloseChest : Module(
             it.cancel()
         }
 
-        on<GuiEvent.KeyPress> {
+        on<ScreenEvent.KeyPress> {
             if (!DungeonUtils.inDungeons) return@on
             if (mc.options.keyInventory.matches(input)) return@on
 
             handleInput(screen)
         }
 
-        on<GuiEvent.MouseClick> {
+        on<ScreenEvent.MouseClick> {
             if (!DungeonUtils.inDungeons) return@on
 
             handleInput(screen)
