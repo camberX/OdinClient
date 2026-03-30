@@ -29,11 +29,13 @@ object SimonSays : Module(
 
     init {
         on<ChatPacketEvent> {
+            if (!autoStart) return@on
             if (value == "[BOSS] Goldor: Who dares trespass into my domain?") s()
         }
 
         on<TickEvent.Start> {
             if (!active) return@on
+            if (!autoStart) return@on
             if (mc.screen != null) return@on
 
             if (delayTicks > 0) {
