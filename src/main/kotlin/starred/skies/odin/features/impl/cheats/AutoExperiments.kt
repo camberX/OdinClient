@@ -29,7 +29,7 @@ object AutoExperiments : Module (
     private var lastClick: Long = 0
 
     init {
-        //~ if >=1.21.11 'GuiEvent' -> 'ScreenEvent'
+        //~ if >= 1.21.11 'GuiEvent' -> 'ScreenEvent' {
         on<ScreenEvent.Open> {
             val title = screen.title?.string ?: return@on
 
@@ -39,6 +39,21 @@ object AutoExperiments : Module (
                 else -> null
             }
         }
+
+        on<ScreenEvent.MouseClick> {
+            if (handler == null) return@on
+            if (mc.screen !is AbstractContainerScreen<*>) return@on
+
+            cancel()
+        }
+
+        on<ScreenEvent.MouseRelease> {
+            if (handler == null) return@on
+            if (mc.screen !is AbstractContainerScreen<*>) return@on
+
+            cancel()
+        }
+        //~ }
 
         on<GuiEvent.SlotUpdate> {
             handler?.onSlotUpdate(this)
