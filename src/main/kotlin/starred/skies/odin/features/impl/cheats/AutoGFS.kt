@@ -4,6 +4,7 @@ import com.odtheking.odin.clickgui.settings.Setting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
 import com.odtheking.odin.events.ChatPacketEvent
+import com.odtheking.odin.events.TickEvent
 import com.odtheking.odin.events.core.on
 import com.odtheking.odin.features.Module
 import com.odtheking.odin.features.impl.dungeon.puzzlesolvers.PuzzleSolvers
@@ -41,8 +42,16 @@ object AutoGFS : Module(
     private val puzzleFailRegex = Regex("^PUZZLE FAIL! (\\w{1,16}) .+$|^\\[STATUE] Oruo the Omniscient: (\\w{1,16}) chose the wrong answer! I shall never forget this moment of misrememberance\\.$")
     private val startRegex = Regex("\\[NPC] Mort: Here, I found this map when I first entered the dungeon\\.|\\[NPC] Mort: Right-click the Orb for spells, and Left-click \\(or Drop\\) to use your Ultimate!")
 
+    private var last = 0
+
     init {
-        scheduleRefill()
+        on<TickEvent.Start> {
+            if (!refillOnTimer) return@on
+            if (++last < timerIncrements * 20) return@on
+
+            last = 0
+            refill()
+        }
 
         on<ChatPacketEvent> {
             when {
@@ -60,14 +69,6 @@ object AutoGFS : Module(
                     if (refillOnDungeonStart) refill()
                 }
             }
-        }
-    }
-
-    private fun scheduleRefill() {
-        val delayTicks = timerIncrements * 20
-        schedule(delayTicks) {
-            if (enabled && refillOnTimer) refill()
-            scheduleRefill()
         }
     }
 
