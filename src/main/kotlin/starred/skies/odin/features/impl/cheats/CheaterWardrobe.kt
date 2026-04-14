@@ -100,7 +100,7 @@ object CheaterWardrobe : Module(
             }
         }
 
-        on<TickEvent.End> {
+        on<TickEvent.Start> {
             if (!isSwapping) return@on
 
             if (System.currentTimeMillis() - startTime > 2000) {

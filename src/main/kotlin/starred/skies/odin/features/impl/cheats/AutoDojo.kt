@@ -98,7 +98,7 @@ object AutoDojo : Module(
             }
         }
 
-        on<TickEvent.End> {
+        on<TickEvent.Start> {
             if (dojoType == DojoType.NONE) return@on
 
             when (dojoType) {
