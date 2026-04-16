@@ -11,10 +11,6 @@ import com.odtheking.odin.utils.modMessage
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
-import net.minecraft.network.chat.ClickEvent
-import net.minecraft.network.chat.Component
-import net.minecraft.network.chat.HoverEvent
-import net.minecraft.network.chat.Style
 import starred.skies.odin.commands.autoClickerCommand
 import starred.skies.odin.commands.autoSellCommand
 import starred.skies.odin.commands.highlightCommand
@@ -24,7 +20,7 @@ import starred.skies.odin.features.ModSettings
 import starred.skies.odin.features.UpdateNotifier
 import starred.skies.odin.features.impl.cheats.*
 import starred.skies.odin.helpers.Scribble
-import java.net.URI
+import xyz.aerii.library.handlers.parser.parse
 
 object OdinClient : ClientModInitializer {
     private val commandsToRegister: Array<Commodore> = arrayOf(
@@ -78,20 +74,7 @@ object OdinClient : ClientModInitializer {
         modMessage("Quick start:", "")
         modMessage("  §b/odin §7- Open configuration menu", "")
         modMessage("", "")
-
-        val message = Component.literal("Need help or want to suggest features? Click to join the Discord!")
-            .withStyle(
-                Style.EMPTY
-                    .withClickEvent(
-                        ClickEvent.OpenUrl(URI("https://discord.gg/DB5S3DjQVa"))
-                    )
-                    .withHoverEvent(
-                        HoverEvent.ShowText(Component.literal("Click to join!").withStyle(Style.EMPTY.withColor(0xFFC4B5FD.toInt())))
-                    )
-                    .withUnderlined(true)
-            )
-
-        modMessage(message, "")
+        modMessage("<hover:<${0xFFC4B5FD.toInt()}>Click to join!><click:url:https://discord.gg/DB5S3DjQVa>Need help or want to suggest features? Click to join the Discord!".parse())
         modMessage(divider, "")
     }
 }
