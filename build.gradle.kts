@@ -83,6 +83,12 @@ afterEvaluate {
     }
 }
 
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.add("-Xskip-prerelease-check")
+    }
+}
+
 tasks {
     processResources {
         inputs.property("id", project.property("mod.id"))
