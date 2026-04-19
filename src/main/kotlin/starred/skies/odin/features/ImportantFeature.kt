@@ -15,6 +15,7 @@ object ImportantFeature {
     private fun fn() {
         schedule(24000) {
             run {
+                if (!ModSettings.important) return@run
                 if (mc.level == null) return@run
                 if ((0..100).random() > 4) return@run
                 val a = if (set.size == 1) set.first() else set.random()
