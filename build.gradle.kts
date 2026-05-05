@@ -54,7 +54,14 @@ dependencies {
     // needed by odin to work properly in dev env as we use modrinth which doesn't provide the transitive dependencies
     modImplementation(libs.okhttp)
     modImplementation(libs.okio)
+
+    val nanovgVer = libs.versions.lwjgl.nanovg.get()
     modImplementation(libs.lwjgl.nanovg)
+    include(libs.lwjgl.nanovg)
+    listOf("windows", "linux", "macos", "macos-arm64").forEach { os ->
+        modImplementation("org.lwjgl:lwjgl-nanovg:$nanovgVer:natives-$os")
+        include("org.lwjgl:lwjgl-nanovg:$nanovgVer:natives-$os")
+    }
 }
 
 loom {

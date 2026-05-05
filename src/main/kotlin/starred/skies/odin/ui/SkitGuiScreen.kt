@@ -8,21 +8,23 @@ import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.renderer.RenderPipelines
+import com.github.noamm9.nvgrenderer.helpers.NvgText
+import com.github.noamm9.nvgrenderer.nvg.NVGPIP.Companion.drawNVG
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import org.lwjgl.glfw.GLFW
 import starred.skies.odin.OdinClient
+import starred.skies.odin.features.impl.cheats.AutoPy
+import java.awt.Color
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import kotlin.math.round
-
 class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
     companion object {
         private const val GUI_SETTINGS_FILE_NAME = "odinclient_gui.json"
-        private const val DEFAULT_TEXT_SCALE = 0.58f
+        internal const val DEFAULT_TEXT_SCALE = 0.58f
         private const val DEFAULT_ACCENT_COLOR = 0xFFD000FF.toInt()
         private const val DEFAULT_SHOW_RAINBOW = true
         private const val DEFAULT_ACCENT_BAR_SKEET_FADE = true
@@ -49,6 +51,7 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
             }
         }
     }
+
     private data class SettingHit(
         val module: Module,
         val fieldName: String,
@@ -114,7 +117,6 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
 
     private val mainContentTopInset = 9
     private val mainContentBottomInset = 8
-    private val mainContentRowTopInset = 6
 
     private var selectedCategory = "General"
     private val modules = OdinClient.getGuiModules()
@@ -158,7 +160,11 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
 
     private fun mainContentY() = frameY + mainContentTopInset
     private fun mainContentH() = frameH - mainContentTopInset - mainContentBottomInset
-    private fun moduleListBaseY() = mainContentY() + mainContentRowTopInset
+    /**
+     * Top Y of the first module row so its vertical center lines up with the first rail category icon
+     * (tile starts at [categoryStackTopY], height [categorySize]).
+     */
+    private fun moduleListBaseY() = categoryStackTopY() + categorySize / 2 - rowHeight / 2
     private fun moduleListBottomY() = mainContentY() + mainContentH()
     private fun frameInnerBottomY() = frameY + frameH - mainContentBottomInset
 
@@ -167,15 +173,21 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
     private fun contentPanelInnerX() = frameX + railW + contentPad + 3
     private fun contentPanelInnerW() = frameW - railW - contentPad * 2 - 6
 
-    private fun railLabelCenterX() = frameX + railW / 2
+    /** Horizontal center of the dark rail strip drawn from [frameX + 6] to [frameX + railW] (not [frameX + railW / 2]). */
+    private fun railColumnCenterX(): Int {
+        val left = frameX + 6
+        val right = frameX + railW
+        return left + (right - left) / 2
+    }
     private fun railTitleBaselineY() = frameY + 8
     private fun categoryStackTopY() = frameY + 15
     private fun categoryCellX(): Int {
-        // Center tiles in the actual rail panel interior (x from frameX+6 to frameX+railW).
+        // Rail interior: frameX+6 .. frameX+railW (do not coerce width to categorySize — that made wide tiles
+        // anchor on the left edge while overflowing right, so icons looked shifted toward the divider).
         val railLeft = frameX + 6
-        val railRight = frameX + railW
-        val railInnerW = (railRight - railLeft).coerceAtLeast(categorySize)
-        return railLeft + ((railInnerW - categorySize) / 2).coerceAtLeast(0)
+        val railInteriorW = (frameX + railW) - railLeft
+        val x = railLeft + (railInteriorW - categorySize) / 2
+        return x.coerceAtLeast(frameX + 2)
     }
 
     override fun init() {
@@ -289,7 +301,7 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         val contentH = mainContentH()
         gui.fill(contentX, contentY, contentX + contentW, contentY + contentH, 0xFF0B0B0B.toInt())
 
-        drawScaledCenteredText(gui, "Odin Client", railLabelCenterX(), railTitleBaselineY(), 0xFFE7ECF4.toInt(), skeetTextScale)
+        drawScaledCenteredText(gui, "Odin Client", railColumnCenterX(), railTitleBaselineY(), 0xFFE7ECF4.toInt(), skeetTextScale)
 
         var catY = categoryStackTopY()
         for (category in categories) {
@@ -694,8 +706,7 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
     private fun drawCategoryButton(gui: GuiGraphics, x: Int, y: Int, w: Int, h: Int, category: String, mx: Int, my: Int) {
         val hovered = inside(mx.toDouble(), my.toDouble(), x, y, w, h)
         val selected = selectedCategory == category
-        // Older visual state: flat tile so selection is read from icon glow, not square shading.
-        gui.fill(x, y, x + w, y + h, 0xFF101010.toInt())
+        // No tile fill — rail panel ([renderBackground]) is already 0x050505; selection reads from icon halo only.
 
         val tid = categoryIconTextureId(category)
         if (hasCategoryIconTexture(tid)) {
@@ -732,23 +743,23 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
 
         // Small text like skeet rows, with a subtle glow when hovered.
         val nameX = cbx + cb + 7
-        val nameY = y + (h - 8) / 2 + 1
+        val textTop = nvgLabelTopY(y, h, skeetTextScale)
         val baseTextColor = if (enabled) 0xFFEAF0FF.toInt() else 0xFFC0C6D2.toInt()
         if (hovered) {
-            drawScaledText(gui, displayModuleName(module), nameX - 1, nameY, 0x50FFFFFF, skeetTextScale)
-            drawScaledText(gui, displayModuleName(module), nameX + 1, nameY, 0x50FFFFFF, skeetTextScale)
-            drawScaledText(gui, displayModuleName(module), nameX, nameY - 1, 0x38FFFFFF, skeetTextScale)
-            drawScaledText(gui, displayModuleName(module), nameX, nameY + 1, 0x38FFFFFF, skeetTextScale)
+            drawScaledText(gui, displayModuleName(module), nameX - 1f, textTop, 0x50FFFFFF, skeetTextScale)
+            drawScaledText(gui, displayModuleName(module), nameX + 1f, textTop, 0x50FFFFFF, skeetTextScale)
+            drawScaledText(gui, displayModuleName(module), nameX.toFloat(), textTop - 1f, 0x38FFFFFF, skeetTextScale)
+            drawScaledText(gui, displayModuleName(module), nameX.toFloat(), textTop + 1f, 0x38FFFFFF, skeetTextScale)
         }
-        drawScaledText(gui, displayModuleName(module), nameX, nameY, baseTextColor, skeetTextScale)
-        drawScaledText(gui, "...", x + w - 12, y + (h - 8) / 2 + 1, 0xFF7F8796.toInt(), skeetTextScale)
+        drawScaledText(gui, displayModuleName(module), nameX.toFloat(), textTop, baseTextColor, skeetTextScale)
+        drawScaledText(gui, "...", (x + w - 12).toFloat(), textTop, 0xFF7F8796.toInt(), skeetTextScale)
     }
 
     private fun drawMiniButton(gui: GuiGraphics, x: Int, y: Int, w: Int, h: Int, text: String, mx: Int, my: Int) {
         val hovered = inside(mx.toDouble(), my.toDouble(), x, y, w, h)
         gui.fill(x, y, x + w, y + h, 0xFF2A2A2A.toInt())
         gui.fill(x + 1, y + 1, x + w - 1, y + h - 1, if (hovered) 0xFF1D1D1D.toInt() else 0xFF121212.toInt())
-        drawScaledCenteredText(gui, text, x + w / 2, y + (h - 8) / 2 + 1, 0xFFCBD3E0.toInt(), skeetTextScale)
+        drawScaledCenteredText(gui, text, x + w / 2, nvgLabelTopY(y, h, skeetTextScale), 0xFFCBD3E0.toInt(), skeetTextScale)
     }
 
     private fun drawGuiSettingsPanel(gui: GuiGraphics, x: Int, y: Int, w: Int, mouseX: Int, mouseY: Int) {
@@ -1216,6 +1227,9 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
             i++
         }
 
+        if (module === AutoPy) {
+            return out.filter { (fieldName, _) -> AutoPy.guiIsSettingFieldVisible(fieldName) }
+        }
         return out
     }
 
@@ -1458,7 +1472,7 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         gui.fill(x, y, x + w, y + h, 0xFF090909.toInt())
         gui.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0xFF121212.toInt())
         drawTopAccentBar(gui, x + 2, y + 2, w - 4)
-        gui.drawString(font, "Color Picker", x + 8, y + 8, 0xFFE7ECF4.toInt(), false)
+        drawScaledText(gui, "Color Picker", x + 8, y + 8, 0xFFE7ECF4.toInt(), skeetTextScale)
 
         // SV square (saturation/value at current hue)
         val svX = x + 10
@@ -1484,11 +1498,11 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         val preview = (((editAlpha * 255f).toInt().coerceIn(0, 255) shl 24) or rgb)
         gui.fill(x + 198, y + 26, x + 250, y + 62, 0xFF2A2A2A.toInt())
         gui.fill(x + 199, y + 27, x + 249, y + 61, preview)
-        gui.drawString(font, "#%08X".format(preview), x + 198, y + 66, 0xFFC8D2E3.toInt(), false)
-        gui.drawString(font, "H ${(editHue * 360f).toInt()}", x + 198, y + 78, 0xFFC8D2E3.toInt(), false)
-        gui.drawString(font, "S ${(editSat * 100f).toInt()}%", x + 198, y + 88, 0xFFC8D2E3.toInt(), false)
-        gui.drawString(font, "V ${(editVal * 100f).toInt()}%", x + 198, y + 98, 0xFFC8D2E3.toInt(), false)
-        gui.drawString(font, "A ${(editAlpha * 100f).toInt()}%", x + 198, y + 108, 0xFFC8D2E3.toInt(), false)
+        drawScaledText(gui, "#%08X".format(preview), x + 198, y + 66, 0xFFC8D2E3.toInt(), skeetTextScale)
+        drawScaledText(gui, "H ${(editHue * 360f).toInt()}", x + 198, y + 78, 0xFFC8D2E3.toInt(), skeetTextScale)
+        drawScaledText(gui, "S ${(editSat * 100f).toInt()}%", x + 198, y + 88, 0xFFC8D2E3.toInt(), skeetTextScale)
+        drawScaledText(gui, "V ${(editVal * 100f).toInt()}%", x + 198, y + 98, 0xFFC8D2E3.toInt(), skeetTextScale)
+        drawScaledText(gui, "A ${(editAlpha * 100f).toInt()}%", x + 198, y + 108, 0xFFC8D2E3.toInt(), skeetTextScale)
 
         drawMiniButton(gui, x + 152, y + h - 18, 48, 14, "Apply", mouseX, mouseY)
         drawMiniButton(gui, x + 206, y + h - 18, 48, 14, "Close", mouseX, mouseY)
@@ -2994,30 +3008,47 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         return mx >= x && mx <= x + w && my >= y && my <= y + h
     }
 
-    private inline fun withScaledFont(gui: GuiGraphics, scale: Float, draw: () -> Unit) {
-        val pose = gui.pose()
-        pose.pushMatrix()
-        pose.scale(scale, scale)
-        try {
-            draw()
-        } finally {
-            pose.popMatrix()
+    /**
+     * NanoVG font size (screen px). Between raw `9*scale` (~too small) and old mistaken `9*scale/DEFAULT` (~too large).
+     * NVG uses top-aligned coords ([NVG.beginFrame] sets `NVG_ALIGN_TOP`), so [y] must be the **top** of the label, not baseline.
+     */
+    private fun scaledNvgPx(scale: Float) = 9f * scale * 1.2f
+
+    /** Top Y for TOP-aligned NanoVG text in a row — tuned between prior −1.75 (too high) and +0.5 (too low). */
+    private fun nvgLabelTopY(rowTop: Int, rowHeight: Int, scale: Float): Float {
+        val px = scaledNvgPx(scale)
+        val centered = rowTop + (rowHeight - px) / 2f
+        return centered - 0.5f
+    }
+
+    private fun drawScaledText(gui: GuiGraphics, text: String, x: Float, y: Float, color: Int, scale: Float) {
+        val px = scaledNvgPx(scale)
+        val clean = NvgText.stripFormatting(text)
+        gui.drawNVG {
+            NvgText.draw(clean, x, y, Color(color, true), px)
         }
     }
 
-    private fun drawScaledText(gui: GuiGraphics, text: String, x: Int, y: Int, color: Int, scale: Float) {
-        withScaledFont(gui, scale) {
-            gui.drawString(font, text, (x / scale).toInt(), (y / scale).toInt(), color, false)
+    private fun drawScaledText(gui: GuiGraphics, text: String, x: Int, y: Int, color: Int, scale: Float) =
+        drawScaledText(gui, text, x.toFloat(), y.toFloat(), color, scale)
+
+    private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Float, color: Int, scale: Float) {
+        val px = scaledNvgPx(scale)
+        val clean = NvgText.stripFormatting(text)
+        gui.drawNVG {
+            NvgText.draw(
+                clean,
+                centerX.toFloat(),
+                y,
+                Color(color, true),
+                px,
+                align = NvgText.Align.CENTER
+            )
         }
     }
 
-    private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Int, color: Int, scale: Float) {
-        withScaledFont(gui, scale) {
-            val unscaledX = (centerX / scale) - (font.width(text) / 2.0f)
-            val unscaledY = y / scale
-            gui.drawString(font, text, round(unscaledX).toInt(), round(unscaledY).toInt(), color, false)
-        }
-    }
+    private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Int, color: Int, scale: Float) =
+        drawScaledCenteredText(gui, text, centerX, y.toFloat(), color, scale)
 
     private fun drawTopAccentBar(gui: GuiGraphics, x: Int, y: Int, width: Int) {
         if (!guiShowRainbowBar || width <= 0) return

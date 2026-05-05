@@ -10,9 +10,11 @@ import com.odtheking.odin.utils.getChatBreak
 import com.odtheking.odin.utils.modMessage
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal
+import com.github.noamm9.nvgrenderer.nvg.NVGPIP
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents
+import net.fabricmc.fabric.api.client.rendering.v1.SpecialGuiElementRegistry
 import net.minecraft.client.Minecraft
 import org.lwjgl.glfw.GLFW
 import starred.skies.odin.commands.*
@@ -36,8 +38,9 @@ object OdinClient : ClientModInitializer {
         CloseChest, DungeonAbilities, FuckDiorite, SecretHitboxes, BreakerHelper, KeyHighlight, LividSolver, SpiritBear, TriggerBot,
         Highlight, AutoClicker, Gloomlock, EscrowFix, AutoGFS, QueueTerms, AutoTerms, Trajectories, AutoSell, SimonSays, InventoryWalk,
         FarmKeys, AutoExperiments, EtherwarpHelper, GhostBlock, DoorESP, CancelInteract, WorldScanner, AutoDojo, CheaterWardrobe,
-        CameraHelper, ModSettings, AutoSuperboom, Ghosts, NoGlow, AutoPy, SingleplayerSpeedSim, TrapperESP,
+        CameraHelper, AspectRatio, ModSettings, AutoSuperboom, Ghosts, NoGlow, AutoPy, SingleplayerSpeedSim, TrapperESP,
         Blink,
+        AutoDagger,
         Sex
     )
 
@@ -59,6 +62,8 @@ object OdinClient : ClientModInitializer {
     }
 
     override fun onInitializeClient() {
+        SpecialGuiElementRegistry.register { NVGPIP(it.vertexConsumers()) }
+
         SkitGuiScreen.loadSharedMenuOpenKeyCode()
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             for (c in commandsToRegister) c.register(dispatcher)

@@ -2,7 +2,9 @@
   "required": false,
   "package": "starred.skies.odin.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "mixins.GameRendererAspectMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }
