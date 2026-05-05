@@ -2,14 +2,15 @@ package starred.skies.odin.commands
 
 import com.github.stivais.commodore.Commodore
 import com.github.stivais.commodore.utils.GreedyString
+import com.odtheking.odin.OdinMod.mc
+import com.odtheking.odin.utils.handlers.schedule
 import com.odtheking.odin.utils.modMessage
 import starred.skies.odin.features.impl.cheats.AutoPy
 
 val autoPyCommand = Commodore("autopy") {
     literal("start").runs { tickArg: GreedyString? ->
         val startTick = tickArg?.string?.trim()?.toIntOrNull()?.coerceIn(0, 95) ?: 95
-        AutoPy.debugStartSimulation(startTick)
-        modMessage("AutoPY simulation started at tick=$startTick (class=${AutoPy.debugCurrentClassMode()}).")
+        startSimulationWithSingleplayerDelay(startTick)
     }
 
     literal("set").runs { tickArg: GreedyString ->
@@ -31,8 +32,7 @@ val autoPyCommand = Commodore("autopy") {
     literal("sim") {
         literal("start").runs { tickArg: GreedyString? ->
             val startTick = tickArg?.string?.trim()?.toIntOrNull()?.coerceIn(0, 95) ?: 95
-            AutoPy.debugStartSimulation(startTick)
-            modMessage("AutoPY simulation started at tick=$startTick (class=${AutoPy.debugCurrentClassMode()}).")
+            startSimulationWithSingleplayerDelay(startTick)
         }
 
         literal("set").runs { tickArg: GreedyString ->
@@ -50,5 +50,18 @@ val autoPyCommand = Commodore("autopy") {
         literal("status").runs {
             modMessage("AutoPY sim status: tick=${AutoPy.debugCurrentPyTick()}, class=${AutoPy.debugCurrentClassMode()}.")
         }
+    }
+}
+
+private fun startSimulationWithSingleplayerDelay(startTick: Int) {
+    if (mc.hasSingleplayerServer()) {
+        modMessage("AutoPY simulation will start in 5s (singleplayer delay) at tick=$startTick.")
+        schedule(100) {
+            AutoPy.debugStartSimulation(startTick)
+            modMessage("AutoPY simulation started at tick=$startTick (class=${AutoPy.debugCurrentClassMode()}).")
+        }
+    } else {
+        AutoPy.debugStartSimulation(startTick)
+        modMessage("AutoPY simulation started at tick=$startTick (class=${AutoPy.debugCurrentClassMode()}).")
     }
 }

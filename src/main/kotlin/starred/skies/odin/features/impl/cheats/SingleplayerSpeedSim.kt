@@ -19,6 +19,8 @@ object SingleplayerSpeedSim : Module(
     // Old CT baseline: 400 speed uses 0.50000000745 for move/ability speed.
     private const val CT_400_SPEED_VALUE = 0.50000000745
     private const val TARGET_400_BPS = 12.26
+    // Empirical correction: without this, in-game 400 feels like Hypixel ~500 (you had to set ~320 to mimic 400).
+    private const val SKYBLOCK_STAT_CORRECTION = 0.8
 
     private val debugSpeedReadout by BooleanSetting(
         "Debug Speed Readout",
@@ -84,7 +86,8 @@ object SingleplayerSpeedSim : Module(
     }
 
     private fun applyCtStyleSpeed(player: LocalPlayer, speedStat: Double) {
-        val ctStyleValue = (speedStat / 400.0) * CT_400_SPEED_VALUE
+        val correctedStat = speedStat * SKYBLOCK_STAT_CORRECTION
+        val ctStyleValue = (correctedStat / 400.0) * CT_400_SPEED_VALUE
         setMovementAttribute(player, ctStyleValue)
         setAbilitySpeeds(player, ctStyleValue.toFloat())
     }

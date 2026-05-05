@@ -25,7 +25,7 @@ import starred.skies.odin.features.impl.cheats.*
 import starred.skies.odin.features.impl.render.NoGlow
 import starred.skies.odin.helpers.Chronos
 import starred.skies.odin.helpers.Scribble
-import starred.skies.odin.ui.SkitGuiScreen
+import starred.skies.odin.ui.ClickGuiScreen
 import xyz.aerii.library.handlers.parser.parse
 import kotlin.concurrent.thread
 
@@ -64,7 +64,7 @@ object OdinClient : ClientModInitializer {
     override fun onInitializeClient() {
         SpecialGuiElementRegistry.register { NVGPIP(it.vertexConsumers()) }
 
-        SkitGuiScreen.loadSharedMenuOpenKeyCode()
+        ClickGuiScreen.loadSharedMenuOpenKeyCode()
         ClientCommandRegistrationCallback.EVENT.register { dispatcher, _ ->
             for (c in commandsToRegister) c.register(dispatcher)
 
@@ -76,7 +76,7 @@ object OdinClient : ClientModInitializer {
                             // Short delay so chat close does not immediately override this screen.
                             thread(isDaemon = true) {
                                 Thread.sleep(50)
-                                mc.execute { mc.setScreen(SkitGuiScreen()) }
+                                mc.execute { mc.setScreen(ClickGuiScreen()) }
                             }
                             1
                         }
@@ -90,14 +90,14 @@ object OdinClient : ClientModInitializer {
         EventBus.subscribe(ImportantFeature)
 
         ClientTickEvents.END_CLIENT_TICK.register { client ->
-            val code = SkitGuiScreen.menuOpenKeyCode()
+            val code = ClickGuiScreen.menuOpenKeyCode()
             if (code < GLFW.GLFW_KEY_SPACE || code > GLFW.GLFW_KEY_LAST) {
                 prevOpenGuiBindDown = false
                 return@register
             }
             val down = GLFW.glfwGetKey(client.window.handle(), code) == GLFW.GLFW_PRESS
-            if (down && !prevOpenGuiBindDown && client.screen !is SkitGuiScreen) {
-                client.setScreen(SkitGuiScreen())
+            if (down && !prevOpenGuiBindDown && client.screen !is ClickGuiScreen) {
+                client.setScreen(ClickGuiScreen())
             }
             prevOpenGuiBindDown = down
         }

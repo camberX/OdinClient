@@ -32,6 +32,7 @@ import starred.skies.odin.utils.Skit
 import starred.skies.odin.utils.leftClick
 import starred.skies.odin.utils.rightClick
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 object TriggerBot : Module(
@@ -63,7 +64,6 @@ object TriggerBot : Module(
     private var currentWatcherEntity: Zombie? = null
     private var firstBloodSpawns = true
     private var bloodTick = 0L
-    private var lastBloodTickAt = System.currentTimeMillis()
     private val trackedBloodMobs = ConcurrentHashMap<Int, BloodMobData>()
     private val clickedBloodMobs = ConcurrentHashMap.newKeySet<Int>()
 
@@ -121,7 +121,7 @@ object TriggerBot : Module(
         }
 
         onReceive<ClientboundSetEquipmentPacket> {
-            if (!blood || currentWatcherEntity != null || !DungeonUtils.inClear) return@onReceive
+            if (!enabled || !blood || currentWatcherEntity != null || !DungeonUtils.inClear) return@onReceive
 
             slots.forEach { slot ->
                 if (slot.second.isEmpty) return@forEach
@@ -133,7 +133,7 @@ object TriggerBot : Module(
         }
 
         onReceive<ClientboundMoveEntityPacket> {
-            if (!blood) return@onReceive
+            if (!enabled || !blood) return@onReceive
             if (xa == 0.toShort() && ya == 0.toShort() && za == 0.toShort()) return@onReceive
             if (!DungeonUtils.inClear) return@onReceive
 
@@ -145,11 +145,14 @@ object TriggerBot : Module(
             val head = entity.getItemBySlot(EquipmentSlot.HEAD)
             if (head.item != Items.PLAYER_HEAD || head.texture !in allowedMobSkulls) return@onReceive
 
-            trackBloodMob(entity, Vec3(
-                entity.x + (xa.toDouble() / 4096.0),
-                entity.y + (ya.toDouble() / 4096.0),
-                entity.z + (za.toDouble() / 4096.0)
-            ))
+            trackBloodMob(
+                entity,
+                Vec3(
+                    entity.x + xa.toDouble() / 4096.0,
+                    entity.y + ya.toDouble() / 4096.0,
+                    entity.z + za.toDouble() / 4096.0
+                )
+            )
         }
 
         onReceive<ClientboundRemoveEntitiesPacket> {
@@ -162,16 +165,17 @@ object TriggerBot : Module(
 
         on<ChatPacketEvent> {
             if (!DungeonUtils.inClear) return@on
-            if (BLOOD_MOVE_REGEX.matches(value)) firstBloodSpawns = false
+            if (BLOOD_MOVE_REGEX.matches(value.noControlCodes.trim())) {
+                firstBloodSpawns = false
+            }
         }
 
         on<TickEvent.Server> {
             bloodTick++
-            lastBloodTickAt = System.currentTimeMillis()
         }
 
         on<TickEvent.Start> {
-            if (!blood || !DungeonUtils.inClear || mc.screen != null) return@on
+            if (!enabled || !blood || !DungeonUtils.inClear || mc.screen != null) return@on
             clickReadyBloodMob()
         }
 
@@ -180,7 +184,6 @@ object TriggerBot : Module(
             currentWatcherEntity = null
             firstBloodSpawns = true
             bloodTick = 0L
-            lastBloodTickAt = System.currentTimeMillis()
             trackedBloodMobs.clear()
             clickedBloodMobs.clear()
         }
@@ -192,12 +195,13 @@ object TriggerBot : Module(
         val data = trackedBloodMobs.getOrPut(entity.id) {
             val randomDelay = if (bloodRandomDelay > 0) Random.nextLong(0, bloodRandomDelay.toLong() + 1L) else 0L
             val firstSpawnDelay = if (firstBloodSpawns) 40 else 0
+            val spawnTickOffset = firstSpawnDelay + bloodSpawnTick.toInt() + bloodOffsetTicks.toInt()
             BloodMobData(
                 startVector = packetVector,
                 lastPosition = packetVector,
-                triggerTick = bloodTick + firstSpawnDelay + bloodSpawnTick + bloodOffsetTicks,
-                triggerMs = lastBloodTickAt + ((firstSpawnDelay + bloodSpawnTick + bloodOffsetTicks) * 50L) + randomDelay,
-                firstSpawns = firstBloodSpawns
+                triggerTick = bloodTick + spawnTickOffset,
+                randomDelayMs = randomDelay,
+                firstSpawns = firstBloodSpawns,
             )
         }
 
@@ -205,23 +209,50 @@ object TriggerBot : Module(
         data.lastPosition = packetVector
         if (delta.lengthSqr() > 0.0) data.deltaHistory.addLast(delta)
 
-        val totalDelta = data.deltaHistory.fold(Vec3.ZERO) { acc, d -> acc.add(d) }
-        data.endVector = data.startVector.add((if (totalDelta.lengthSqr() > 0.0) totalDelta.normalize() else Vec3.ZERO).scale(if (data.firstSpawns) 16.1 else 11.9))
+        var sx = 0.0
+        var sy = 0.0
+        var sz = 0.0
+        for (d in data.deltaHistory) {
+            sx += d.x
+            sy += d.y
+            sz += d.z
+        }
+        val lenSq = sx * sx + sy * sy + sz * sz
+        val dir = if (lenSq > 1e-12) {
+            val inv = 1.0 / sqrt(lenSq)
+            Vec3(sx * inv, sy * inv, sz * inv)
+        } else {
+            Vec3.ZERO
+        }
+        data.endVector = data.startVector.add(dir.scale(if (data.firstSpawns) 16.1 else 11.9))
     }
 
     private fun clickReadyBloodMob() {
         val now = bloodTick
         val nowMs = System.currentTimeMillis()
         trackedBloodMobs.entries.removeIf { (id, data) ->
-            if (id in clickedBloodMobs || now > data.triggerTick + 3) return@removeIf true
+            if (id in clickedBloodMobs) return@removeIf true
+            if (now > data.triggerTick + BLOOD_POST_TRIGGER_GRACE_TICKS) return@removeIf true
             if (now < data.triggerTick) return@removeIf false
-            if (nowMs < data.triggerMs) return@removeIf false
-            if (!isLookingNear(data.endVector)) return@removeIf true
+            if (data.randomDelayMs > 0L) {
+                if (data.randomDelayDeadlineMs < 0L) {
+                    data.randomDelayDeadlineMs = nowMs + data.randomDelayMs
+                }
+                if (nowMs < data.randomDelayDeadlineMs) return@removeIf false
+            }
+            if (!isAimAcceptableForBloodMob(id, data)) return@removeIf false
 
             clickedBloodMobs.add(id)
             leftClick()
             true
         }
+    }
+
+    /** True if crosshair is near predicted spawn or (once loaded) the live armor stand. */
+    private fun isAimAcceptableForBloodMob(id: Int, data: BloodMobData): Boolean {
+        if (isLookingNear(data.endVector)) return true
+        val live = mc.level?.getEntity(id) as? ArmorStand ?: return false
+        return isLookingNear(live.position())
     }
 
     private fun isLookingNear(pos: Vec3): Boolean {
@@ -249,18 +280,21 @@ object TriggerBot : Module(
     private val watcherSkulls by lazy { bloodCampSkullSet("watcherSkulls") }
     private val allowedMobSkulls by lazy { bloodCampSkullSet("allowedMobSkulls") }
 
-    private data class BloodMobData(
+    private class BloodMobData(
         val startVector: Vec3,
         var lastPosition: Vec3,
         val triggerTick: Long,
-        val triggerMs: Long,
+        val randomDelayMs: Long,
         val firstSpawns: Boolean,
         val deltaHistory: ArrayDeque<Vec3> = ArrayDeque(),
-        var endVector: Vec3 = startVector
+        var endVector: Vec3 = startVector,
+        var randomDelayDeadlineMs: Long = -1L,
     )
 
     private const val BLOOD_AIM_RADIUS = 2.5
     private const val BLOOD_AIM_RANGE = 30.0
+    /** Server ticks after [BloodMobData.triggerTick] we keep retrying aim before discarding. */
+    private const val BLOOD_POST_TRIGGER_GRACE_TICKS = 20
 
     private val BLOOD_MOVE_REGEX = Regex("^\\[BOSS] The Watcher: Let's see how you can handle this\\.$")
 }

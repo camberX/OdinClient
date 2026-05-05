@@ -8,8 +8,6 @@ import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.renderer.RenderPipelines
-import com.github.noamm9.nvgrenderer.helpers.NvgText
-import com.github.noamm9.nvgrenderer.nvg.NVGPIP.Companion.drawNVG
 import net.minecraft.network.chat.Component
 import net.minecraft.resources.Identifier
 import net.minecraft.world.item.ItemStack
@@ -17,11 +15,15 @@ import net.minecraft.world.item.Items
 import org.lwjgl.glfw.GLFW
 import starred.skies.odin.OdinClient
 import starred.skies.odin.features.impl.cheats.AutoPy
+import starred.skies.odin.ui.base.ClickGuiLayout
+import starred.skies.odin.ui.base.ClickGuiModuleUtils
+import starred.skies.odin.ui.base.ClickGuiSettingsSnapshot
+import starred.skies.odin.ui.base.ClickGuiSettingsStore
+import starred.skies.odin.ui.elements.ClickGuiPaint
 import java.awt.Color
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
-class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
+class ClickGuiScreen : Screen(Component.literal("Odin Client")) {
     companion object {
         private const val GUI_SETTINGS_FILE_NAME = "odinclient_gui.json"
         internal const val DEFAULT_TEXT_SCALE = 0.58f
@@ -158,37 +160,26 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
     private var guiSettingsLoaded = false
     private val categoryTextureSizeCache = mutableMapOf<Identifier, Pair<Int, Int>>()
 
-    private fun mainContentY() = frameY + mainContentTopInset
-    private fun mainContentH() = frameH - mainContentTopInset - mainContentBottomInset
+    private fun mainContentY() = ClickGuiLayout.mainContentY(frameY, mainContentTopInset)
+    private fun mainContentH() = ClickGuiLayout.mainContentH(frameH, mainContentTopInset, mainContentBottomInset)
     /**
      * Top Y of the first module row so its vertical center lines up with the first rail category icon
      * (tile starts at [categoryStackTopY], height [categorySize]).
      */
-    private fun moduleListBaseY() = categoryStackTopY() + categorySize / 2 - rowHeight / 2
-    private fun moduleListBottomY() = mainContentY() + mainContentH()
-    private fun frameInnerBottomY() = frameY + frameH - mainContentBottomInset
+    private fun moduleListBaseY() = ClickGuiLayout.moduleListBaseY(categoryStackTopY(), categorySize, rowHeight)
+    private fun moduleListBottomY() = ClickGuiLayout.moduleListBottomY(mainContentY(), mainContentH())
+    private fun frameInnerBottomY() = ClickGuiLayout.frameInnerBottomY(frameY, frameH, mainContentBottomInset)
 
-    private fun mainContentPanelX() = frameX + railW + contentPad
-    private fun mainContentPanelW() = frameW - railW - contentPad - 8
-    private fun contentPanelInnerX() = frameX + railW + contentPad + 3
-    private fun contentPanelInnerW() = frameW - railW - contentPad * 2 - 6
+    private fun mainContentPanelX() = ClickGuiLayout.mainContentPanelX(frameX, railW, contentPad)
+    private fun mainContentPanelW() = ClickGuiLayout.mainContentPanelW(frameW, railW, contentPad)
+    private fun contentPanelInnerX() = ClickGuiLayout.contentPanelInnerX(frameX, railW, contentPad)
+    private fun contentPanelInnerW() = ClickGuiLayout.contentPanelInnerW(frameW, railW, contentPad)
 
     /** Horizontal center of the dark rail strip drawn from [frameX + 6] to [frameX + railW] (not [frameX + railW / 2]). */
-    private fun railColumnCenterX(): Int {
-        val left = frameX + 6
-        val right = frameX + railW
-        return left + (right - left) / 2
-    }
-    private fun railTitleBaselineY() = frameY + 8
-    private fun categoryStackTopY() = frameY + 15
-    private fun categoryCellX(): Int {
-        // Rail interior: frameX+6 .. frameX+railW (do not coerce width to categorySize — that made wide tiles
-        // anchor on the left edge while overflowing right, so icons looked shifted toward the divider).
-        val railLeft = frameX + 6
-        val railInteriorW = (frameX + railW) - railLeft
-        val x = railLeft + (railInteriorW - categorySize) / 2
-        return x.coerceAtLeast(frameX + 2)
-    }
+    private fun railColumnCenterX(): Int = ClickGuiLayout.railColumnCenterX(frameX, railW)
+    private fun railTitleBaselineY() = ClickGuiLayout.railTitleBaselineY(frameY)
+    private fun categoryStackTopY() = ClickGuiLayout.categoryStackTopY(frameY)
+    private fun categoryCellX(): Int = ClickGuiLayout.categoryCellX(frameX, railW, categorySize)
 
     override fun init() {
         super.init()
@@ -472,49 +463,9 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         scrollOffset = scrollOffset.coerceIn(0, maxScrollOffset())
     }
 
-    private fun getModuleCategory(module: Module): String {
-        val key = (module.javaClass.simpleName + " " + module.name).lowercase()
+    private fun getModuleCategory(module: Module): String = ClickGuiModuleUtils.getModuleCategory(module)
 
-        // Rendering / visual modules first.
-        if (key.contains("highlight") || key.contains("trajectory") || key.contains("noglow") || key.contains("worldscanner")) {
-            return "Rendering"
-        }
-
-        // Floor 7 specific helpers.
-        if (key.contains("autoterms") || key.contains("queueterms") || key.contains("simon") ||
-            key.contains("autosuperboom") || key.contains("autopy")
-        ) {
-            return "Floor 7"
-        }
-
-        // General dungeon utility modules.
-        if (key.contains("dungeon") || key.contains("secret") || key.contains("livid") || key.contains("spiritbear") ||
-            key.contains("sentry") || key.contains("door") || key.contains("etherwarp") || key.contains("farmkeys") ||
-            key.contains("autodojo") || key.contains("autogfs") || key.contains("autosell") || key.contains("simon") ||
-            key.contains("breakerhelper") || key.contains("keyhighlight") || key.contains("ghostblock") || key.contains("cancelinteract")
-        ) {
-            return "Dungeons"
-        }
-
-        return "General"
-    }
-
-    private fun moduleButtonText(module: Module): Component {
-        val on = if (isModuleEnabled(module)) "ON" else "OFF"
-        return Component.literal("${displayModuleName(module)}: $on")
-    }
-
-    private fun displayModuleName(module: Module): String {
-        var name = module.name
-        // Remove decorative suffix tags like "(C)", "(II)", etc.
-        name = name.replace(Regex("\\s*\\([^)]*\\)"), "")
-        // Remove long separator labels that are used as pseudo section rows.
-        name = name.replace(Regex("^\\s*[-_—]{2,}\\s*"), "")
-            .replace(Regex("\\s*[-_—]{2,}\\s*$"), "")
-        // Normalize extra spaces after cleanup.
-        name = name.replace(Regex("\\s{2,}"), " ").trim()
-        return if (name.isBlank()) module.name else name
-    }
+    private fun displayModuleName(module: Module): String = ClickGuiModuleUtils.displayModuleName(module)
 
     private fun categoryIconStack(category: String): ItemStack = when (category.uppercase()) {
         "GENERAL" -> ItemStack(Items.COMPASS)
@@ -646,62 +597,9 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         }
     }
 
-    private fun isModuleEnabled(module: Module): Boolean {
-        runCatching {
-            val m = module.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.returnType == java.lang.Boolean.TYPE &&
-                    (it.name.equals("isEnabled", true) || it.name.equals("getEnabled", true))
-            }
-            if (m != null) return m.invoke(module) as Boolean
-        }
+    private fun isModuleEnabled(module: Module): Boolean = ClickGuiModuleUtils.isModuleEnabled(module)
 
-        runCatching {
-            val f = module.javaClass.declaredFields.firstOrNull {
-                it.type == java.lang.Boolean.TYPE && it.name.equals("enabled", true)
-            }
-            if (f != null) {
-                f.isAccessible = true
-                return f.getBoolean(module)
-            }
-        }
-
-        return false
-    }
-
-    private fun toggleModule(module: Module) {
-        val current = isModuleEnabled(module)
-
-        runCatching {
-            val toggle = module.javaClass.methods.firstOrNull {
-                it.parameterCount == 0 && it.name.equals("toggle", true)
-            }
-            if (toggle != null) {
-                toggle.invoke(module)
-                return
-            }
-        }
-
-        runCatching {
-            val setEnabled = module.javaClass.methods.firstOrNull {
-                it.parameterCount == 1 && it.parameterTypes[0] == java.lang.Boolean.TYPE &&
-                    (it.name.equals("setEnabled", true) || it.name.equals("setState", true))
-            }
-            if (setEnabled != null) {
-                setEnabled.invoke(module, !current)
-                return
-            }
-        }
-
-        runCatching {
-            val f = module.javaClass.declaredFields.firstOrNull {
-                it.type == java.lang.Boolean.TYPE && it.name.equals("enabled", true)
-            }
-            if (f != null) {
-                f.isAccessible = true
-                f.setBoolean(module, !current)
-            }
-        }
-    }
+    private fun toggleModule(module: Module) = ClickGuiModuleUtils.toggleModule(module)
 
     private fun drawCategoryButton(gui: GuiGraphics, x: Int, y: Int, w: Int, h: Int, category: String, mx: Int, my: Int) {
         val hovered = inside(mx.toDouble(), my.toDouble(), x, y, w, h)
@@ -923,68 +821,41 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
 
     private fun loadGuiSettings() {
         val path = guiSettingsPath() ?: return
-        runCatching {
-            Files.createDirectories(path.parent)
-            if (!Files.exists(path)) {
-                saveGuiSettings(path)
-                return
-            }
-            val raw = Files.readString(path)
-            if (raw.isBlank()) {
-                saveGuiSettings(path)
-                return
-            }
-            fun findInt(key: String, fallback: Int): Int {
-                val m = Regex("\"$key\"\\s*:\\s*(-?\\d+)").find(raw) ?: return fallback
-                return m.groupValues[1].toIntOrNull() ?: fallback
-            }
-            fun findFloat(key: String, fallback: Float): Float {
-                val m = Regex("\"$key\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)").find(raw) ?: return fallback
-                return m.groupValues[1].toFloatOrNull() ?: fallback
-            }
-            fun findBool(key: String, fallback: Boolean): Boolean {
-                val m = Regex("\"$key\"\\s*:\\s*(true|false)", RegexOption.IGNORE_CASE).find(raw) ?: return fallback
-                return m.groupValues[1].equals("true", ignoreCase = true)
-            }
-
-            guiAccentColor = findInt("accentColor", DEFAULT_ACCENT_COLOR)
-            guiShowRainbowBar = findBool("showRainbowBar", DEFAULT_SHOW_RAINBOW)
-            guiAccentBarSkeetFade = findBool("accentBarSkeetFade", DEFAULT_ACCENT_BAR_SKEET_FADE)
-            guiDenseLayout = findBool("denseLayout", DEFAULT_DENSE_LAYOUT)
-            skeetTextScale = findFloat("textScale", DEFAULT_TEXT_SCALE).coerceIn(0.58f, 0.95f)
-            categorySize = findInt("categorySize", DEFAULT_CATEGORY_SIZE).coerceIn(28, 56)
-            guiMenuOpenKeyCode = findInt("menuOpenKeyCode", DEFAULT_MENU_OPEN_KEY_CODE)
-            sharedMenuOpenKeyCode = guiMenuOpenKeyCode
-            applyDensityPreset()
-        }.onFailure {
-            // If parse fails, rewrite a clean config and continue with current/default values.
-            saveGuiSettings(path)
-        }
+        val defaults = ClickGuiSettingsSnapshot(
+            accentColor = DEFAULT_ACCENT_COLOR,
+            showRainbowBar = DEFAULT_SHOW_RAINBOW,
+            accentBarSkeetFade = DEFAULT_ACCENT_BAR_SKEET_FADE,
+            denseLayout = DEFAULT_DENSE_LAYOUT,
+            textScale = DEFAULT_TEXT_SCALE,
+            categorySize = DEFAULT_CATEGORY_SIZE,
+            menuOpenKeyCode = DEFAULT_MENU_OPEN_KEY_CODE,
+        )
+        val loaded = ClickGuiSettingsStore.load(path, defaults)
+        guiAccentColor = loaded.accentColor
+        guiShowRainbowBar = loaded.showRainbowBar
+        guiAccentBarSkeetFade = loaded.accentBarSkeetFade
+        guiDenseLayout = loaded.denseLayout
+        skeetTextScale = loaded.textScale
+        categorySize = loaded.categorySize
+        guiMenuOpenKeyCode = loaded.menuOpenKeyCode
+        sharedMenuOpenKeyCode = guiMenuOpenKeyCode
+        applyDensityPreset()
     }
 
     private fun saveGuiSettings(pathOverride: Path? = null) {
         val path = pathOverride ?: guiSettingsPath() ?: return
-        runCatching {
-            Files.createDirectories(path.parent)
-            val json = buildString {
-                append("{\n")
-                append("  \"accentColor\": ").append(guiAccentColor).append(",\n")
-                append("  \"showRainbowBar\": ").append(guiShowRainbowBar).append(",\n")
-                append("  \"accentBarSkeetFade\": ").append(guiAccentBarSkeetFade).append(",\n")
-                append("  \"denseLayout\": ").append(guiDenseLayout).append(",\n")
-                append("  \"textScale\": ").append(String.format(java.util.Locale.ROOT, "%.3f", skeetTextScale)).append(",\n")
-                append("  \"categorySize\": ").append(categorySize).append(",\n")
-                append("  \"menuOpenKeyCode\": ").append(guiMenuOpenKeyCode).append("\n")
-                append("}\n")
-            }
-            Files.writeString(
-                path,
-                json,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING,
-                StandardOpenOption.WRITE
+        ClickGuiSettingsStore.save(
+            path,
+            ClickGuiSettingsSnapshot(
+                accentColor = guiAccentColor,
+                showRainbowBar = guiShowRainbowBar,
+                accentBarSkeetFade = guiAccentBarSkeetFade,
+                denseLayout = guiDenseLayout,
+                textScale = skeetTextScale,
+                categorySize = categorySize,
+                menuOpenKeyCode = guiMenuOpenKeyCode,
             )
-        }
+        )
     }
 
     private fun applyDensityPreset() {
@@ -3008,119 +2879,23 @@ class SkitGuiScreen : Screen(Component.literal("Odin Client")) {
         return mx >= x && mx <= x + w && my >= y && my <= y + h
     }
 
-    /**
-     * NanoVG font size (screen px). Between raw `9*scale` (~too small) and old mistaken `9*scale/DEFAULT` (~too large).
-     * NVG uses top-aligned coords ([NVG.beginFrame] sets `NVG_ALIGN_TOP`), so [y] must be the **top** of the label, not baseline.
-     */
-    private fun scaledNvgPx(scale: Float) = 9f * scale * 1.2f
-
     /** Top Y for TOP-aligned NanoVG text in a row — tuned between prior −1.75 (too high) and +0.5 (too low). */
-    private fun nvgLabelTopY(rowTop: Int, rowHeight: Int, scale: Float): Float {
-        val px = scaledNvgPx(scale)
-        val centered = rowTop + (rowHeight - px) / 2f
-        return centered - 0.5f
-    }
+    private fun nvgLabelTopY(rowTop: Int, rowHeight: Int, scale: Float): Float =
+        ClickGuiPaint.nvgLabelTopY(rowTop, rowHeight, scale)
 
-    private fun drawScaledText(gui: GuiGraphics, text: String, x: Float, y: Float, color: Int, scale: Float) {
-        val px = scaledNvgPx(scale)
-        val clean = NvgText.stripFormatting(text)
-        gui.drawNVG {
-            NvgText.draw(clean, x, y, Color(color, true), px)
-        }
-    }
+    private fun drawScaledText(gui: GuiGraphics, text: String, x: Float, y: Float, color: Int, scale: Float) =
+        ClickGuiPaint.drawScaledText(gui, text, x, y, color, scale)
 
     private fun drawScaledText(gui: GuiGraphics, text: String, x: Int, y: Int, color: Int, scale: Float) =
         drawScaledText(gui, text, x.toFloat(), y.toFloat(), color, scale)
 
-    private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Float, color: Int, scale: Float) {
-        val px = scaledNvgPx(scale)
-        val clean = NvgText.stripFormatting(text)
-        gui.drawNVG {
-            NvgText.draw(
-                clean,
-                centerX.toFloat(),
-                y,
-                Color(color, true),
-                px,
-                align = NvgText.Align.CENTER
-            )
-        }
-    }
+    private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Float, color: Int, scale: Float) =
+        ClickGuiPaint.drawScaledCenteredText(gui, text, centerX, y, color, scale)
 
     private fun drawScaledCenteredText(gui: GuiGraphics, text: String, centerX: Int, y: Int, color: Int, scale: Float) =
         drawScaledCenteredText(gui, text, centerX, y.toFloat(), color, scale)
 
-    private fun drawTopAccentBar(gui: GuiGraphics, x: Int, y: Int, width: Int) {
-        if (!guiShowRainbowBar || width <= 0) return
-        if (guiAccentBarSkeetFade) drawRainbowBar(gui, x, y, width, 1)
-        else drawAccentThemedBar(gui, x, y, width, 1)
-    }
-
-    private fun drawAccentThemedBar(gui: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
-        if (width <= 0 || height <= 0) return
-        val r0 = (guiAccentColor shr 16) and 0xFF
-        val g0 = (guiAccentColor shr 8) and 0xFF
-        val b0 = guiAccentColor and 0xFF
-        val hsb = java.awt.Color.RGBtoHSB(r0, g0, b0, null)
-        for (i in 0 until width) {
-            val t = (i.toFloat() / (width - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
-            val s = t * t * (3f - 2f * t)
-            val br = 0.38f + 0.62f * s
-            val sat = 0.78f + 0.22f * s
-            val c = java.awt.Color.getHSBColor(
-                hsb[0],
-                (hsb[1] * sat).coerceIn(0f, 1f),
-                (br * hsb[2]).coerceIn(0.08f, 1f)
-            )
-            val argb = 0xFF000000.toInt() or (c.red shl 16) or (c.green shl 8) or c.blue
-            gui.fill(x + i, y, x + i + 1, y + height, argb)
-        }
-    }
-
-    private fun drawRainbowBar(gui: GuiGraphics, x: Int, y: Int, width: Int, height: Int) {
-        if (width <= 0 || height <= 0) return
-        for (i in 0 until width) {
-            val t = (i.toFloat() / (width - 1).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
-            val rgb = skeetAccentRgbAt(t)
-            val argb = 0xFF000000.toInt() or rgb
-            gui.fill(x + i, y, x + i + 1, y + height, argb)
-        }
-    }
-
-    private fun skeetAccentRgbAt(t: Float): Int {
-        // Hand-tuned control points to mimic classic skeet top-bar fade:
-        // mostly cool -> warm, with only a small violet tail.
-        val stops = arrayOf(
-            0.00f to intArrayOf(86, 188, 255),   // cyan
-            0.22f to intArrayOf(88, 220, 170),   // aqua-green
-            0.46f to intArrayOf(168, 226, 102),  // yellow-green
-            0.64f to intArrayOf(236, 198, 92),   // warm yellow
-            0.80f to intArrayOf(229, 106, 108),  // red
-            0.92f to intArrayOf(211, 103, 178),  // soft magenta
-            1.00f to intArrayOf(140, 122, 224)   // subtle violet end
-        )
-        val clamped = t.coerceIn(0f, 1f)
-        var idx = 0
-        while (idx < stops.size - 1 && clamped > stops[idx + 1].first) idx++
-        val (t0, c0) = stops[idx]
-        val (t1, c1) = stops[(idx + 1).coerceAtMost(stops.lastIndex)]
-        val localT = if (t1 <= t0) 0f else ((clamped - t0) / (t1 - t0)).coerceIn(0f, 1f)
-        // Ease the interpolation so each segment has a subtle fade-in/out like skeet.
-        val s = localT * localT * (3f - 2f * localT)
-        var r = (c0[0] + (c1[0] - c0[0]) * s).toInt().coerceIn(0, 255)
-        var g = (c0[1] + (c1[1] - c0[1]) * s).toInt().coerceIn(0, 255)
-        var b = (c0[2] + (c1[2] - c0[2]) * s).toInt().coerceIn(0, 255)
-
-        // Slightly desaturate/darken to match the muted skeet line.
-        val avg = (r + g + b) / 3
-        val satKeep = 0.88f
-        r = (avg + (r - avg) * satKeep).toInt().coerceIn(0, 255)
-        g = (avg + (g - avg) * satKeep).toInt().coerceIn(0, 255)
-        b = (avg + (b - avg) * satKeep).toInt().coerceIn(0, 255)
-        r = (r * 0.94f).toInt().coerceIn(0, 255)
-        g = (g * 0.94f).toInt().coerceIn(0, 255)
-        b = (b * 0.94f).toInt().coerceIn(0, 255)
-        return (r shl 16) or (g shl 8) or b
-    }
+    private fun drawTopAccentBar(gui: GuiGraphics, x: Int, y: Int, width: Int) =
+        ClickGuiPaint.drawTopAccentBar(gui, x, y, width, guiShowRainbowBar, guiAccentBarSkeetFade, guiAccentColor)
 
 }

@@ -3,6 +3,7 @@ package starred.skies.odin.features.impl.cheats
 import com.mojang.blaze3d.platform.InputConstants
 import com.odtheking.odin.clickgui.settings.Setting.Companion.withDependency
 import com.odtheking.odin.clickgui.settings.impl.BooleanSetting
+import com.odtheking.odin.clickgui.settings.impl.ColorSetting
 import com.odtheking.odin.clickgui.settings.impl.NumberSetting
 import com.odtheking.odin.clickgui.settings.impl.SelectorSetting
 import com.odtheking.odin.events.ChatPacketEvent
@@ -15,9 +16,7 @@ import com.odtheking.odin.utils.Colors
 import com.odtheking.odin.utils.modMessage
 import com.odtheking.odin.utils.noControlCodes
 import com.odtheking.odin.utils.render.drawStyledBox
-import com.odtheking.odin.utils.render.drawText
 import com.odtheking.odin.utils.skyblock.dungeon.DungeonUtils
-import net.minecraft.client.KeyMapping
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.network.chat.Component
@@ -29,10 +28,9 @@ import org.lwjgl.glfw.GLFW
 import starred.skies.odin.mixin.accessors.KeyMappingAccessor
 import starred.skies.odin.utils.Skit
 import starred.skies.odin.utils.leftClick
-import starred.skies.odin.utils.rightClick
 import kotlin.math.abs
 import kotlin.math.atan2
-import kotlin.math.min
+import kotlin.math.exp
 import kotlin.math.sqrt
 
 object AutoPy : Module(
@@ -40,226 +38,141 @@ object AutoPy : Module(
     description = "Automatically handles PY in dungeons boss.",
     category = Skit.CHEATS
 ) {
-    private val classMode by SelectorSetting(
-        "Class",
-        "Archer",
-        arrayListOf("Archer", "Mage"),
-        desc = "Choose PY behavior profile."
-    )
-    private var bossOnly by BooleanSetting("Boss Only", true, desc = "Only run while in dungeon boss.")
-    private var startAtTick by NumberSetting("Start At Tick", 5.0, 0.0, 95.0, 1.0, desc = "Start walking when PY timer reaches this value.")
-    private var rightTicks by NumberSetting("Right Ticks", 3.0, 1.0, 30.0, 1.0, desc = "Ticks to walk right onto pad.")
-    private var leftTicks by NumberSetting("Left Ticks", 4.0, 1.0, 30.0, 1.0, desc = "Ticks to walk left off pad.")
-    private var postLeftTicks by NumberSetting("Post Left Ticks", 20.0, 1.0, 60.0, 1.0, desc = "Ticks to strafe left after post-rotate.")
-    private var useBlockStepOff by BooleanSetting("Use Block Step-Off", true, desc = "Step off when crusher block appears in target column.")
-    private var holdFallbackTicks by NumberSetting("Hold Fallback Ticks", 60.0, 1.0, 120.0, 1.0, desc = "Fallback hold duration if block check fails.").withDependency { useBlockStepOff }
-    private var rotateAfterStepOff by BooleanSetting("Rotate After Step-Off", true, desc = "Rotate to 180/0 then strafe left.")
-    private var rotateDurationTicks by NumberSetting("Rotate Duration Ticks", 12.0, 1.0, 40.0, 1.0, desc = "How many ticks smooth rotation should take.").withDependency { rotateAfterStepOff }
-    private var archerRotateDurationTicks by NumberSetting(
-        "Archer Rotate Ticks",
-        10.0,
-        1.0,
-        40.0,
-        1.0,
-        desc = "How many ticks Archer aimlock smoothing should take."
-    ).withDependency { isArcherMode() }
-    private var archerStartAtTick by NumberSetting(
-        "Archer Start Tick",
-        86.0,
-        0.0,
-        95.0,
-        1.0,
-        desc = "Archer only starts aimlock/charge at or below this tick (after lightning phase)."
-    ).withDependency { isArcherMode() }
-    private var archerDebug by BooleanSetting(
-        "Archer Debug",
-        desc = "Print Archer AutoPY stage trace in chat."
-    ).withDependency { isArcherMode() }
-    private var archerServerTickHud by BooleanSetting(
-        "Archer Server Tick HUD",
-        true,
-        desc = "Show server tick counter on crosshair/action bar after Storm P2 trigger."
-    ).withDependency { isArcherMode() }
-    private var archerWaypoints by BooleanSetting(
-        "Archer Waypoints",
-        true,
-        desc = "Render world waypoints for Archer start/aim positions."
-    ).withDependency { isArcherMode() }
 
-    private val stormPyRegex = Regex("^\\[BOSS] Storm: (ENERGY HEED MY CALL|THUNDER LET ME BE YOUR CATALYST)!$")
-    private val stormP2StartRegex = Regex("^\\[BOSS] Storm: Pathetic Maxor, just like expected\\.$")
+    // ─── Settings ────────────────────────────────────────────────────────────
+
+    private val classMode by SelectorSetting("Class", "Archer", arrayListOf("Archer", "Mage"),
+        desc = "Choose PY behavior profile.")
+
+    private var bossOnly by BooleanSetting("Boss Only", true,
+        desc = "Only run while in dungeon boss.")
+
+    // Mage-only settings
+    private var startAtTick by NumberSetting("Start At Tick", 5.0, 0.0, 95.0, 1.0,
+        desc = "Start walking when PY timer reaches this value.")
+        .withDependency { !isArcherMode() }
+
+    private var rightTicks by NumberSetting("Right Ticks", 3.0, 1.0, 30.0, 1.0,
+        desc = "Ticks to walk right onto pad.")
+        .withDependency { !isArcherMode() }
+
+    private var leftTicks by NumberSetting("Left Ticks", 4.0, 1.0, 30.0, 1.0,
+        desc = "Ticks to walk left off pad.")
+        .withDependency { !isArcherMode() }
+
+    private var postLeftTicks by NumberSetting("Post Left Ticks", 20.0, 1.0, 60.0, 1.0,
+        desc = "Ticks to strafe left after post-rotate.")
+        .withDependency { !isArcherMode() }
+
+    private var useBlockStepOff by BooleanSetting("Use Block Step-Off", true,
+        desc = "Step off when crusher block appears in target column.")
+        .withDependency { !isArcherMode() }
+
+    private var holdFallbackTicks by NumberSetting("Hold Fallback Ticks", 60.0, 1.0, 120.0, 1.0,
+        desc = "Fallback hold duration if block check fails.")
+        .withDependency { !isArcherMode() && useBlockStepOff }
+
+    private var rotateAfterStepOff by BooleanSetting("Rotate After Step-Off", true,
+        desc = "Rotate to 180/0 then strafe left.")
+        .withDependency { !isArcherMode() }
+
+    private var rotateDurationTicks by NumberSetting("Rotate Duration Ticks", 12.0, 1.0, 40.0, 1.0,
+        desc = "How many ticks smooth rotation should take.")
+        .withDependency { !isArcherMode() && rotateAfterStepOff }
+
+    // Archer-only settings
+    private var archerRotateDurationTicks by NumberSetting("Archer Rotate Ticks", 10.0, 1.0, 40.0, 1.0,
+        desc = "How many ticks Archer aimlock smoothing should take.")
+        .withDependency { isArcherMode() }
+
+    private var archerReleaseOffsetTicks by NumberSetting("Archer Release Offset", 0.0, -10.0, 10.0, 1.0, unit = "t",
+        desc = "Adjust Archer release timing by server ticks.")
+        .withDependency { isArcherMode() }
+
+    private var archerAimJitter by NumberSetting("Archer Aim Jitter", 0.45, 0.0, 2.5, 0.05, unit = "°",
+        desc = "Random ±° on yaw and pitch per PY cycle (stable while aiming; 0 = perfect aim).")
+        .withDependency { isArcherMode() }
+
+    private var archerDebug by BooleanSetting("Archer Debug",
+        desc = "Print Archer AutoPY stage trace in chat.")
+        .withDependency { isArcherMode() }
+
+    private var archerServerTickHud by BooleanSetting("Archer Server Tick HUD", true,
+        desc = "Show server tick counter on crosshair/action bar after Storm P2 trigger.")
+        .withDependency { isArcherMode() }
+
+    private var archerWaypoints by BooleanSetting("Archer Waypoints", true,
+        desc = "Render world waypoint for Archer aim position.")
+        .withDependency { isArcherMode() }
+    private var archerAimWaypointColor by ColorSetting("Archer Aim Waypoint Color", Colors.MINECRAFT_AQUA, true,
+        desc = "Color of the Archer aim waypoint.")
+        .withDependency { isArcherMode() && archerWaypoints }
+    private var archerAimWaypointFilled by BooleanSetting("Archer Aim Waypoint Filled", false,
+        desc = "Fill Archer aim waypoint box instead of outline only.")
+        .withDependency { isArcherMode() }
+
+    // ─── Constants ───────────────────────────────────────────────────────────
+
+    private val STORM_PY_REGEX = Regex("^\\[BOSS] Storm: (ENERGY HEED MY CALL|THUNDER LET ME BE YOUR CATALYST)!\$")
+    private val STORM_P2_START_REGEX = Regex("^\\[BOSS] Storm: Pathetic Maxor, just like expected\\.\$")
+
+    // Crusher block scan range
+    private const val CRUSHER_CONFIRM_TICKS = 2
+    private const val CRUSHER_X = 101; private const val CRUSHER_Z = 68
+    private const val CRUSHER_Y_TOP = 185; private const val CRUSHER_Y_BOTTOM = 181
+
+    // Archer aim target marker
+    private val ARCHER_AIM_POS = Vec3(100.5, 182.0, 64.0)
+
+    // Archer timing
+    private const val ARCHER_RELEASE_TICK = 74; private const val ARCHER_MIN_CHARGE_TICKS = 20
+    private const val ARCHER_JUMP_DELAY_TICKS = 10; private const val ARCHER_JUMP_GAP_TICKS = 3
+    private const val ARCHER_SERVER_START_TICK = 0; private const val ARCHER_SERVER_RELEASE_TICK = 142
+
+    // ─── State ───────────────────────────────────────────────────────────────
 
     private enum class Phase { IDLE, RIGHT, HOLD, LEFT, POST_ROTATE }
 
-    private var phase = Phase.IDLE
-    private var ticksRemaining = 0
-    private var startedCycle = false
-    private var pyTickTime = -1
-    private var pyTriggered = false
-    private var manualMode = false
-    private var manualLeftTicks = 0
-    private var manualPadMode = false
-    private var manualPadFallback = 12
-    private var postTicksRemaining = 0
-    private var postStarted = false
-    private var rotateThread: Thread? = null
-    private var crusherSeenTicksVar = 0
-    private var archerCharging = false
-    private var archerReleasedThisCycle = false
-    private var archerPostJumpDelayTicks = 0
-    private var archerJumpsRemaining = 0
-    private var archerJumpCooldownTicks = 0
-    private var archerAimlockCancelled = false
-    private var archerAimlockApplied = false
-    private var archerTerminatorSlot = -1
-    private var archerSwapToTerminatorPending = false
-    private var archerReleasedThisTick = false
-    private var archerDropDelayTicks = -1
-    private var archerDropTriggered = false
-    private var archerLastMouseX = Double.NaN
-    private var archerLastMouseY = Double.NaN
-    private var archerServerTicking = false
-    private var archerServerTicks = -1
-    private var archerServerWindowStarted = false
-    private var archerMissingLbLogged = false
-    private var archerLastSelectedSlot = -1
-    private var archerExpectedSlot = -1
-    private var archerSlotChangeGraceTicks = 0
+    // Mage movement state
+    private var phase = Phase.IDLE; private var ticksRemaining = 0; private var startedCycle = false
+    private var pyTickTime = -1; private var manualMode = false; private var manualLeftTicks = 0
+    private var manualPadMode = false; private var manualPadFallback = 12; private var postTicksRemaining = 0
+    private var postStarted = false; private var rotateThread: Thread? = null; private var crusherSeenTicks = 0
+
+    // Archer state
+    private var archerCharging = false; private var archerReleasedThisCycle = false; private var archerReleasedThisTick = false
+    private var archerPostJumpDelayTicks = 0; private var archerJumpsRemaining = 0; private var archerJumpCooldownTicks = 0
+    private var archerAimlockCancelled = false; private var archerTerminatorSlot = -1; private var archerSwapToTerminatorPending = false
+    private var archerServerTicking = false; private var archerServerTicks = -1; private var archerServerWindowStarted = false
+    private var archerFullyChargedLastTick = false; private var archerLastAimNanos = 0L; private var archerLastAimUpdateMs = 0L
+    private var archerLastSelectedSlot = -1; private var archerExpectedSlot = -1; private var archerSlotChangeGraceTicks = 0
+    private var archerSpamLeftClick = false; private var archerNextLeftClickAt = 0L
+
+    /** Resampled at the start of each Archer cycle; not re-rolled every frame. */
+    private var archerAimJitterYaw = 0f
+    private var archerAimJitterPitch = 0f
+
     private var debugSimulationActive = false
 
-    private val crusherConfirmTicks = 2
-    private val crusherX = 101
-    private val crusherZ = 68
-    private val crusherYTop = 185
-    private val crusherYBottom = 181
-    private val archerAimX = 101.0
-    private val archerAimY = 181.0
-    private val archerAimZ = 64.0
-    private val archerReleaseTick = 74
-    private val archerMinChargeTicks = 20
-    private val archerJumpDelayTicks = 10 // 500ms at 20 TPS
-    private val archerJumpGapTicks = 3
-    private val archerServerStartTick = 0
-    private val archerServerReleaseTick = 142
-    private val archerStartCheckX = 87.7
-    private val archerStartCheckY = 169.0
-    private val archerStartCheckZ = 75.3
-
-    private fun classModeLabel(): String = when (val v = classMode) {
-        is String -> v
-        is Number -> if (v.toInt() == 1) "Mage" else "Archer"
-        else -> v.toString()
-    }
-
-    private fun isArcherMode(): Boolean = classModeLabel().equals("Archer", ignoreCase = true)
-    private fun isArcherCycleActive(): Boolean =
-        pyTickTime >= 0 || archerCharging || archerReleasedThisCycle || archerDropDelayTicks >= 0 || archerServerTicking
-    private fun isArcherActionActive(): Boolean =
-        archerServerWindowStarted || archerCharging || archerReleasedThisCycle || archerDropDelayTicks >= 0 || debugSimulationActive
-
-    private fun archerDebugLog(msg: String) {
-        if (!archerDebug) return
-        modMessage("[AutoPY Archer Debug] $msg")
-    }
-
-    // GUI bridge (used by SkitGuiScreen)
-    fun guiGetClassMode(): String = classModeLabel()
-    fun guiGetBossOnly(): Boolean = bossOnly
-    fun guiSetBossOnly(v: Boolean) { bossOnly = v }
-    fun guiGetRightTicks(): Double = rightTicks
-    fun guiSetRightTicks(v: Double) { rightTicks = v.coerceIn(1.0, 30.0) }
-    fun guiGetLeftTicks(): Double = leftTicks
-    fun guiSetLeftTicks(v: Double) { leftTicks = v.coerceIn(1.0, 30.0) }
-    fun guiGetUseBlockStepOff(): Boolean = useBlockStepOff
-    fun guiSetUseBlockStepOff(v: Boolean) { useBlockStepOff = v }
-    fun debugCurrentPyTick(): Int = pyTickTime
-    fun debugCurrentClassMode(): String = classModeLabel()
+    // ─── Initialization / Event Handlers ─────────────────────────────────────
 
     init {
-        on<ChatPacketEvent> {
-            if (!DungeonUtils.inBoss) return@on
-            if (isArcherMode() && value.matches(stormPyRegex)) {
-                archerServerTicking = true
-                archerServerTicks = 0
-                archerServerWindowStarted = true
-                archerCharging = false
-                archerReleasedThisCycle = false
-                archerDropDelayTicks = -1
-                archerDropTriggered = false
-                archerDebugLog("archer_lightning_trigger_matched serverTick=0")
-            }
-            if (!isArcherMode() && value.matches(stormP2StartRegex)) {
-                archerServerTicking = true
-                archerServerTicks = 0
-                archerServerWindowStarted = false
-                archerCharging = false
-                archerReleasedThisCycle = false
-                archerDebugLog("storm_p2_start_matched serverTick=0")
-            }
-            if (!isArcherMode() && !pyTriggered && value.matches(stormPyRegex)) {
-                pyTriggered = true
-                pyTickTime = 95
-                archerCharging = false
-                archerReleasedThisCycle = false
-                archerDebugLog("storm_trigger_matched tick=95")
-            }
-        }
-
-        on<TickEvent.Server> {
-            if (!archerServerTicking) return@on
-            archerServerTicks++
-        }
-
-        on<TickEvent.Start> {
-            if (isArcherMode() && archerDebug) {
-                val p = mc.player
-                if (p != null) {
-                    val inside = isWithinStartZone(p, archerStartCheckX, archerStartCheckZ)
-                    if (inside) {
-                        val dx = abs(p.x - archerStartCheckX)
-                        val dz = abs(p.z - archerStartCheckZ)
-                        archerDebugLog("start_zone_inside dx=%.2f dz=%.2f".format(dx, dz))
-                    }
-                }
-            }
-            if (bossOnly && !DungeonUtils.inBoss && !debugSimulationActive) { resetAllState(); return@on }
-
-            if (!isArcherMode() || debugSimulationActive) {
-                if (pyTickTime >= 0) pyTickTime--
-                if (pyTickTime < 0) {
-                    pyTriggered = false
-                    if (isArcherMode()) debugSimulationActive = false
-                }
-            }
-
-            if (isArcherMode()) {
-                runArcherStep()
-                return@on
-            }
-
-            if (manualPadMode) { runMovementStep(manual = false, padManual = true); return@on }
-            if (manualMode) { runMovementStep(manual = true, padManual = false); return@on }
-
-            if (!startedCycle && pyTickTime < 0) { resetMovementState(); return@on }
-
-            if (!startedCycle && pyTickTime <= startAtTick.toInt()) {
-                startedCycle = true
-                phase = Phase.RIGHT
-                ticksRemaining = rightTicks.toInt()
-            }
-
-            if (phase != Phase.IDLE) runMovementStep(manual = false, padManual = false)
-        }
-
-        on<WorldEvent.Load> {
-            releaseKeys()
-            resetAllState()
-        }
+        on<ChatPacketEvent> { handleChat(value) }
+        on<TickEvent.Server> { if (enabled && archerServerTicking) archerServerTicks++ }
+        on<TickEvent.Start> { if (enabled) handleTick() }
+        on<WorldEvent.Load> { releaseKeys(); resetAllState() }
 
         on<RenderEvent.Extract> {
-            if (!isArcherMode() || !archerWaypoints) return@on
-            renderArcherWaypoint("Archer Start", archerStartCheckX, archerStartCheckY, archerStartCheckZ, Colors.MINECRAFT_GREEN)
-            renderArcherWaypoint("Archer Aim", archerAimX, archerAimY, archerAimZ, Colors.MINECRAFT_AQUA)
+            if (!enabled || !isArcherMode()) return@on
+            if (archerWaypoints) {
+                renderArcherWaypoint(ARCHER_AIM_POS.x, ARCHER_AIM_POS.y, ARCHER_AIM_POS.z, archerAimWaypointColor, archerAimWaypointFilled)
+            }
+            val p = mc.player ?: return@on
+            if (!archerAimlockCancelled && shouldApplyArcherAimlock(p)) {
+                val (yaw, pitch) = computeArcherAim(p)
+                applyArcherAimlockSmooth(yaw, pitch)
+                archerLastAimUpdateMs = System.currentTimeMillis()
+            }
         }
     }
 
@@ -269,51 +182,82 @@ object AutoPy : Module(
         resetAllState()
     }
 
-    fun debugStartSimulation(startTick: Int = 95) {
-        releaseKeys()
-        releaseUse()
-        resetAllState()
-        debugSimulationActive = true
-        pyTriggered = true
-        pyTickTime = startTick.coerceIn(0, 95)
-        archerDebugLog("sim_start tick=$pyTickTime")
+    // ─── Event Handling ───────────────────────────────────────────────────────
+
+    private fun handleChat(value: String) {
+        if (!enabled) return
+
+        // Hard-stop Archer cycle on phase transition (can fire before inBoss flips)
+        if (isArcherMode() && isArcherCycleActive() &&
+            (value.contains("Storm is enraged!") || value.contains("[BOSS] Goldor:"))) {
+            archerSpamLeftClick = false
+            stopArcherCycle("storm_phase_end")
+            return
+        }
+
+        if (!DungeonUtils.inBoss) return
+
+        when {
+            isArcherMode() && value.matches(STORM_PY_REGEX) -> {
+                archerServerTicking = true
+                archerServerTicks = 0
+                archerServerWindowStarted = true
+                archerCharging = false
+                archerReleasedThisCycle = false
+                resampleArcherAimJitter()
+                archerDebugLog("archer_lightning_trigger_matched serverTick=0")
+            }
+            !isArcherMode() && value.matches(STORM_P2_START_REGEX) -> {
+                archerServerTicking = true
+                archerServerTicks = 0
+                archerServerWindowStarted = false
+                archerCharging = false
+                archerReleasedThisCycle = false
+                archerDebugLog("storm_p2_start_matched serverTick=0")
+            }
+            !isArcherMode() && pyTickTime < 0 && value.matches(STORM_PY_REGEX) -> {
+                pyTickTime = 95
+                archerCharging = false
+                archerReleasedThisCycle = false
+                archerDebugLog("storm_trigger_matched tick=95")
+            }
+        }
     }
 
-    fun debugSetSimulationTick(tick: Int) {
-        pyTickTime = tick.coerceIn(-1, 95)
-        pyTriggered = pyTickTime >= 0
-        debugSimulationActive = pyTickTime >= 0
-        archerDebugLog("sim_set tick=$pyTickTime")
+    private fun handleTick() {
+        val outOfBoss = bossOnly && !DungeonUtils.inBoss && !debugSimulationActive
+        if (outOfBoss) {
+            val stateIsDirty = startedCycle || phase != Phase.IDLE ||
+                    isArcherCycleActive() || pyTickTime >= 0 || manualMode || manualPadMode
+            if (stateIsDirty) resetAllState()
+            return
+        }
+
+        if (!isArcherMode() || debugSimulationActive) {
+            if (pyTickTime >= 0) pyTickTime--
+            if (pyTickTime < 0 && isArcherMode()) debugSimulationActive = false
+        }
+
+        if (isArcherMode()) {
+            runArcherStep()
+            return
+        }
+
+        when {
+            manualPadMode -> runMovementStep(manual = false, padManual = true)
+            manualMode    -> runMovementStep(manual = true,  padManual = false)
+            !startedCycle && pyTickTime < 0 -> resetMovementState()
+            !startedCycle && pyTickTime <= startAtTick.toInt() -> {
+                startedCycle = true
+                phase = Phase.RIGHT
+                ticksRemaining = rightTicks.toInt()
+                runMovementStep(manual = false, padManual = false)
+            }
+            phase != Phase.IDLE -> runMovementStep(manual = false, padManual = false)
+        }
     }
 
-    fun debugStopSimulation() {
-        releaseKeys()
-        releaseUse()
-        debugSimulationActive = false
-        resetAllState()
-        archerDebugLog("sim_stop")
-    }
-
-    fun runManualStrafe(right: Int, left: Int) {
-        releaseKeys()
-        resetMovementState()
-        manualPadMode = false
-        manualMode = true
-        manualLeftTicks = left.coerceAtLeast(1)
-        phase = Phase.RIGHT
-        ticksRemaining = right.coerceAtLeast(1)
-    }
-
-    fun runManualPadStrafe(right: Int, left: Int, fallbackHold: Int = 12) {
-        releaseKeys()
-        resetMovementState()
-        manualMode = false
-        manualPadMode = true
-        manualLeftTicks = left.coerceAtLeast(1)
-        manualPadFallback = fallbackHold.coerceAtLeast(1)
-        phase = Phase.RIGHT
-        ticksRemaining = right.coerceAtLeast(1)
-    }
+    // ─── Movement (Mage) ─────────────────────────────────────────────────────
 
     private fun runMovementStep(manual: Boolean, padManual: Boolean) {
         when (phase) {
@@ -322,25 +266,24 @@ object AutoPy : Module(
             Phase.RIGHT -> {
                 setKeys(right = true)
                 if (--ticksRemaining <= 0) {
-                    if (padManual || (useBlockStepOff && !manual)) {
-                        phase = Phase.HOLD
+                    phase = if (padManual || (useBlockStepOff && !manual)) {
+                        crusherSeenTicks = 0
                         ticksRemaining = if (padManual) manualPadFallback else holdFallbackTicks.toInt()
-                        crusherSeenTicksVar = 0
+                        Phase.HOLD
                     } else {
-                        phase = Phase.LEFT
                         ticksRemaining = if (manual) manualLeftTicks else leftTicks.toInt()
+                        Phase.LEFT
                     }
                 }
             }
 
             Phase.HOLD -> {
                 releaseKeys()
-                if ((padManual || useBlockStepOff) && isCrusherBlockPresentInRange()) crusherSeenTicksVar++ else crusherSeenTicksVar = 0
-                val leave = crusherSeenTicksVar >= crusherConfirmTicks || --ticksRemaining <= 0
-                if (leave) {
-                    phase = Phase.LEFT
+                if ((padManual || useBlockStepOff) && isCrusherBlockPresent()) crusherSeenTicks++ else crusherSeenTicks = 0
+                if (crusherSeenTicks >= CRUSHER_CONFIRM_TICKS || --ticksRemaining <= 0) {
+                    crusherSeenTicks = 0
                     ticksRemaining = if (padManual || manual) manualLeftTicks else leftTicks.toInt()
-                    crusherSeenTicksVar = 0
+                    phase = Phase.LEFT
                 }
             }
 
@@ -365,10 +308,7 @@ object AutoPy : Module(
                 val p = mc.player ?: run { phase = Phase.IDLE; return }
                 if (!postStarted) {
                     postStarted = true
-                    // Class profile selector: Archer keeps leap swap, Mage skips it.
-                    if (isArcherMode()) {
-                        findLeapHotbarSlot().takeIf { it >= 0 }?.let { p.inventory.setSelectedSlot(it) }
-                    }
+                    if (isArcherMode()) findLeapHotbarSlot().takeIf { it >= 0 }?.let { p.inventory.setSelectedSlot(it) }
                 }
                 setKeys(left = true)
                 if (--postTicksRemaining <= 0) {
@@ -381,300 +321,251 @@ object AutoPy : Module(
         }
     }
 
+    // ─── Automation (Archer) ──────────────────────────────────────────────────
+
     private fun runArcherStep() {
         val p = mc.player ?: return
-        val currentSlot = p.inventory.selectedSlot
-        if (archerLastSelectedSlot < 0) archerLastSelectedSlot = currentSlot
-        val slotChangedThisTick = currentSlot != archerLastSelectedSlot
-        if (archerSlotChangeGraceTicks > 0) archerSlotChangeGraceTicks--
-        val userHotbarSlotChanged = slotChangedThisTick &&
-            archerSlotChangeGraceTicks <= 0 &&
-            currentSlot != archerExpectedSlot
-        archerLastSelectedSlot = currentSlot
 
-        if (archerServerTickHud && archerServerTicking) {
-            val state = when {
-                !archerServerWindowStarted && archerServerTicks < archerServerStartTick -> "waiting_start"
-                !archerServerWindowStarted -> "waiting_arm"
-                archerCharging -> "charging"
-                !archerReleasedThisCycle -> "armed_wait"
-                else -> "post_release"
-            }
-            p.displayClientMessage(Component.literal("PY Server Ticks: $archerServerTicks [$state]"), true)
-        }
-        // Completely idle outside an active Archer cycle (prevents non-P2 interference/spam).
+        trackHotbarChanges(p)
+        updateServerTickHud(p)
+
         if (!isArcherCycleActive()) return
 
-        // Input reset is only meaningful once we're actively executing (charging/post-release),
-        // not at the exact arming moment, otherwise the cycle can die before aimlock is visible.
-        val executingArcherFlow = archerCharging || archerReleasedThisCycle || archerDropDelayTicks >= 0
-        if (executingArcherFlow && (isAnyUserInputActive() || userHotbarSlotChanged)) {
-            if (userHotbarSlotChanged) {
-                archerDebugLog("manual_hotbar_change_detected -> cycle_end_reset")
-            } else {
-                archerDebugLog("manual_input_detected -> cycle_end_reset")
-            }
-            releaseKeys()
-            releaseUse()
-            resetAllState()
-            return
-        }
-        // Local PY timer is only authoritative in debug simulation mode.
-        // In live Archer mode we run purely from server ticks (650/689), so do not early-return here.
+        handleManualInputGuard(p)
+
         if (debugSimulationActive && pyTickTime < 0) {
-            if (archerCharging) releaseUse()
-            if (archerPostJumpDelayTicks > 0 || archerJumpsRemaining > 0) {
-                releaseKeys()
-            }
-            archerCharging = false
-            archerReleasedThisCycle = false
-            archerPostJumpDelayTicks = 0
-            archerJumpsRemaining = 0
-            archerJumpCooldownTicks = 0
-            archerSwapToTerminatorPending = false
-            archerReleasedThisTick = false
-            archerTerminatorSlot = -1
+            cleanupArcherMidCycle()
             return
         }
 
         if (!debugSimulationActive) {
             if (!archerServerTicking) return
             if (!archerServerWindowStarted) {
-                if (archerServerTicks < archerServerStartTick) return
+                if (archerServerTicks < ARCHER_SERVER_START_TICK) return
                 archerServerWindowStarted = true
                 archerDebugLog("serverTick=$archerServerTicks lightning_window_armed")
             }
         } else {
-            // Debug simulation fallback: old local tick gating.
-            val effectiveStartTick = maxOf(archerStartAtTick.toInt(), archerReleaseTick + archerMinChargeTicks)
-            if (pyTickTime > effectiveStartTick) {
+            // Debug mode: gate on local tick
+            val effectiveStart = (ARCHER_RELEASE_TICK + archerReleaseOffsetTicks.toInt()).coerceIn(0, 95) + ARCHER_MIN_CHARGE_TICKS
+            if (pyTickTime > effectiveStart) {
                 if (archerCharging) releaseUse()
                 archerCharging = false
                 return
             }
         }
-        if (archerDropDelayTicks < 0 && !archerDropTriggered) {
-            archerDropDelayTicks = 20 // 1 second at 20 TPS, measured from end of lightning window.
-            archerDebugLog("drop_timer_started delay=${archerDropDelayTicks}t")
-        }
-        if (!archerDropTriggered && archerDropDelayTicks >= 0) {
-            if (archerDropDelayTicks == 0) {
-                pressDropKeyOnce()
-                archerDropTriggered = true
-                archerDebugLog("drop_key_pressed")
-            } else {
-                archerDropDelayTicks--
-            }
-        }
 
+        updateArcherAimlock(p)
+        handleArcherRelease(p)
+
+        if (archerReleasedThisCycle) runPostReleaseFlow(p)
+    }
+
+    private fun trackHotbarChanges(p: net.minecraft.client.player.LocalPlayer) {
+        if (archerLastSelectedSlot < 0) archerLastSelectedSlot = p.inventory.selectedSlot
+        if (archerSlotChangeGraceTicks > 0) archerSlotChangeGraceTicks--
+        archerLastSelectedSlot = p.inventory.selectedSlot
+    }
+
+    private fun updateServerTickHud(p: net.minecraft.client.player.LocalPlayer) {
+        if (!archerServerTickHud || !archerServerTicking) return
+        val state = when {
+            !archerServerWindowStarted && archerServerTicks < ARCHER_SERVER_START_TICK -> "waiting_start"
+            !archerServerWindowStarted -> "waiting_arm"
+            archerCharging            -> "charging"
+            !archerReleasedThisCycle  -> "armed_wait"
+            else                      -> "post_release"
+        }
+        p.displayClientMessage(Component.literal("PY Server Ticks: $archerServerTicks [$state]"), true)
+    }
+
+    private fun handleManualInputGuard(p: net.minecraft.client.player.LocalPlayer) {
+        val executing = archerCharging || archerReleasedThisCycle
+
+        val slotChanged = p.inventory.selectedSlot != archerLastSelectedSlot &&
+                archerSlotChangeGraceTicks <= 0 &&
+                p.inventory.selectedSlot != archerExpectedSlot
+        val userInput = isAnyUserInputActive(ignoreUseInput = true)
+
+        if (executing && (userInput || slotChanged)) {
+            archerDebugLog(if (slotChanged) "manual_hotbar_change_detected -> cycle_end_reset" else "manual_input_detected -> cycle_end_reset")
+            releaseKeys(); releaseUse(); resetAllState()
+        }
+    }
+
+    private fun cleanupArcherMidCycle() {
+        if (archerCharging) releaseUse()
+        if (archerPostJumpDelayTicks > 0 || archerJumpsRemaining > 0) releaseKeys()
+        archerCharging = false
+        archerReleasedThisCycle = false
+        archerPostJumpDelayTicks = 0
+        archerJumpsRemaining = 0
+        archerJumpCooldownTicks = 0
+        archerSwapToTerminatorPending = false
+        archerReleasedThisTick = false
+        archerTerminatorSlot = -1
+    }
+
+    private fun updateArcherAimlock(p: net.minecraft.client.player.LocalPlayer) {
         val (targetYaw, targetPitch) = computeArcherAim(p)
-        // Cancel aimlock on any user mouse input (cursor movement), not angle deviation.
-        val window = mc.window.handle()
-        val mx = DoubleArray(1)
-        val my = DoubleArray(1)
-        GLFW.glfwGetCursorPos(window, mx, my)
-        if (!archerAimlockCancelled && archerAimlockApplied) {
-            if (!archerLastMouseX.isNaN() && !archerLastMouseY.isNaN()) {
-                if (mx[0] != archerLastMouseX || my[0] != archerLastMouseY) {
-                    archerAimlockCancelled = true
-                }
-            }
+
+        // Hard-lock: ignore mouse movement
+        archerAimlockCancelled = false
+
+        val fullyCharged = isLastBreathFullyCharged(p)
+        if (fullyCharged && !archerFullyChargedLastTick) {
+            applyArcherAimlock(targetYaw, targetPitch)
         }
-        archerLastMouseX = mx[0]
-        archerLastMouseY = my[0]
-        if (!archerAimlockCancelled) {
+        archerFullyChargedLastTick = fullyCharged
+
+        if (!archerAimlockCancelled && shouldApplyArcherAimlock(p) &&
+            System.currentTimeMillis() - archerLastAimUpdateMs > 100L) {
             applyArcherAimlockSmooth(targetYaw, targetPitch)
-            archerAimlockApplied = true
+            archerLastAimUpdateMs = System.currentTimeMillis()
         }
-        if (!archerReleasedThisCycle) {
-            val lbSlot = findLastBreathHotbarSlot()
-            val useSlot = when {
-                lbSlot >= 0 -> lbSlot
-                isHeldBow(p) -> p.inventory.selectedSlot
-                else -> -1
-            }
-            if (useSlot >= 0) {
-                setArcherSelectedSlot(p, useSlot)
-                archerMissingLbLogged = false
-            } else {
-                if (!archerMissingLbLogged) {
-                    archerDebugLog("last_breath_not_found (and not holding bow)")
-                    archerMissingLbLogged = true
-                }
-                if (archerCharging) releaseUse()
-                archerCharging = false
+    }
+
+    private fun handleArcherRelease(p: net.minecraft.client.player.LocalPlayer) {
+        val (targetYaw, targetPitch) = computeArcherAim(p)
+        val shouldRelease = if (debugSimulationActive) {
+            val effectiveReleaseTick = (ARCHER_RELEASE_TICK + archerReleaseOffsetTicks.toInt()).coerceIn(0, 95)
+            pyTickTime <= effectiveReleaseTick
+        } else {
+            val liveReleaseTick = (ARCHER_SERVER_RELEASE_TICK + archerReleaseOffsetTicks.toInt()).coerceAtLeast(0)
+            archerServerWindowStarted && archerServerTicks >= liveReleaseTick
+        }
+
+        if (!archerReleasedThisCycle && shouldRelease) {
+            val heldName = p.mainHandItem.hoverName?.string?.noControlCodes?.lowercase() ?: ""
+            val usingLb = p.isUsingItem && ("last breath" in heldName || "lastbreath" in heldName)
+            if (!usingLb || !isLastBreathFullyCharged(p)) {
+                archerDebugLog("release_waiting held='$heldName' using=${p.isUsingItem} full=${isLastBreathFullyCharged(p)} t=${if (debugSimulationActive) pyTickTime else archerServerTicks}")
                 return
             }
-        }
 
-        val shouldCharge = if (debugSimulationActive) {
-            pyTickTime > archerReleaseTick
-        } else {
-            archerServerWindowStarted && archerServerTicks in archerServerStartTick until archerServerReleaseTick
-        }
-        val shouldReleaseNow = if (debugSimulationActive) {
-            pyTickTime == archerReleaseTick
-        } else {
-            archerServerWindowStarted && archerServerTicks == archerServerReleaseTick
-        }
-
-        if (!archerReleasedThisCycle && shouldCharge) {
-            if (!archerCharging) {
-                // Explicitly start use once, then hold.
-                rightClick()
-                archerDebugLog("charge_started t=${if (debugSimulationActive) pyTickTime else archerServerTicks} item=${p.mainHandItem.item}")
-            }
-            mc.options.keyUse.setDown(true)
-            archerCharging = true
-        } else if (!archerReleasedThisCycle && shouldReleaseNow) {
             releaseUse()
             archerCharging = false
             archerReleasedThisCycle = true
             archerReleasedThisTick = true
+            archerAimlockCancelled = false
+
+            applyArcherAimlock(targetYaw, targetPitch)
             archerDebugLog("release_tick_reached t=${if (debugSimulationActive) pyTickTime else archerServerTicks}")
+
             archerTerminatorSlot = findTerminatorHotbarSlot()
             archerSwapToTerminatorPending = archerTerminatorSlot >= 0
-            archerDebugLog("terminator_slot=${archerTerminatorSlot}")
-            archerPostJumpDelayTicks = archerJumpDelayTicks
+            archerDebugLog("terminator_slot=$archerTerminatorSlot")
+
+            archerPostJumpDelayTicks = ARCHER_JUMP_DELAY_TICKS
             archerJumpsRemaining = 3
             archerJumpCooldownTicks = 0
+            archerSpamLeftClick = true
+            archerNextLeftClickAt = System.currentTimeMillis()
+        } else {
+            archerCharging = false
+        }
+    }
+
+    private fun runPostReleaseFlow(p: net.minecraft.client.player.LocalPlayer) {
+        if (archerReleasedThisTick) {
+            archerReleasedThisTick = false
+            archerDebugLog("post_release_buffer_tick")
+            return
         }
 
-        if (archerReleasedThisCycle) {
-            if (archerReleasedThisTick) {
-                // Do nothing else on the exact release tick to avoid cancelling the shot.
-                archerReleasedThisTick = false
-                archerDebugLog("post_release_buffer_tick")
-                return
-            }
-            if (archerSwapToTerminatorPending) {
-                // Swap one tick after release so Last Breath shot is not cancelled by instant item switch.
-                if (archerTerminatorSlot >= 0) setArcherSelectedSlot(p, archerTerminatorSlot)
-                archerSwapToTerminatorPending = false
-                archerDebugLog("swap_to_terminator slot=$archerTerminatorSlot")
-            } else if (archerTerminatorSlot >= 0) {
-                setArcherSelectedSlot(p, archerTerminatorSlot)
-            }
-            if (isUnderArcherTarget(p)) {
-                releaseKeys()
-                return
-            }
-            leftClick()
-            setKeys(up = true)
-            if (archerPostJumpDelayTicks > 0) {
-                archerPostJumpDelayTicks--
-            } else {
-                if (archerJumpCooldownTicks > 0) {
-                    archerJumpCooldownTicks--
-                    setKeys(up = true)
-                } else if (archerJumpsRemaining > 0) {
-                    setKeys(up = true, jump = true)
-                    archerDebugLog("jump_tap remaining_before=${archerJumpsRemaining}")
-                    archerJumpsRemaining--
-                    archerJumpCooldownTicks = archerJumpGapTicks
-                } else {
-                    setKeys(up = true)
-                }
+        // Swap to Terminator one tick after release
+        if (archerSwapToTerminatorPending) {
+            if (archerTerminatorSlot >= 0) setArcherSelectedSlot(p, archerTerminatorSlot)
+            archerSwapToTerminatorPending = false
+            archerDebugLog("swap_to_terminator slot=$archerTerminatorSlot")
+        } else if (archerTerminatorSlot >= 0) {
+            setArcherSelectedSlot(p, archerTerminatorSlot)
+        }
+
+        if (archerSpamLeftClick) tryArcherLeftClick15Cps()
+
+        if (isUnderArcherTarget(p)) { releaseKeys(); return }
+
+        setKeys(up = true)
+        when {
+            archerPostJumpDelayTicks > 0 -> archerPostJumpDelayTicks--
+            archerJumpCooldownTicks > 0  -> archerJumpCooldownTicks--
+            archerJumpsRemaining > 0     -> {
+                setKeys(up = true, jump = true)
+                archerDebugLog("jump_tap remaining_before=$archerJumpsRemaining")
+                archerJumpsRemaining--
+                archerJumpCooldownTicks = ARCHER_JUMP_GAP_TICKS
             }
         }
     }
 
-    private fun isAnyUserInputActive(): Boolean {
-        val windowHandle = mc.window.handle()
-        val window = mc.window
-
-        // Mouse buttons
-        if (GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS) return true
-        if (GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) return true
-        if (GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS) return true
-
-        // Common movement/combat inputs (physical state, not programmatic keybind state)
-        val watched = listOf(
-            mc.options.keyUp,
-            mc.options.keyDown,
-            mc.options.keyLeft,
-            mc.options.keyRight,
-            mc.options.keyJump,
-            mc.options.keyShift,
-            mc.options.keySprint,
-            mc.options.keyAttack,
-            mc.options.keyUse
-        )
-        for (key in watched) {
-            val bound = (key as? KeyMappingAccessor)?.boundKey ?: continue
-            val code = bound.value
-            if (code > 7) {
-                if (InputConstants.isKeyDown(window, code)) return true
-            } else if (code >= 0) {
-                if (GLFW.glfwGetMouseButton(windowHandle, code) == GLFW.GLFW_PRESS) return true
-            }
-        }
-        return false
-    }
+    // ─── Aimlock ──────────────────────────────────────────────────────────────
 
     private fun computeArcherAim(p: net.minecraft.client.player.LocalPlayer): Pair<Float, Float> {
-        val dx = archerAimX - p.x
-        val dz = archerAimZ - p.z
-        val dy = archerAimY - (p.y + p.eyeHeight.toDouble())
-        val distXZ = sqrt(dx * dx + dz * dz).coerceAtLeast(1.0E-6)
-        val yaw = Math.toDegrees(atan2(dz, dx)).toFloat() - 90f
-        val pitch = (-Math.toDegrees(atan2(dy, distXZ))).toFloat().coerceIn(-90f, 90f)
-        return yaw to pitch
+        val dx = ARCHER_AIM_POS.x - p.x
+        val dz = ARCHER_AIM_POS.z - p.z
+        val dy = ARCHER_AIM_POS.y - (p.y + p.eyeHeight.toDouble())
+        val distXZ = sqrt(dx * dx + dz * dz).coerceAtLeast(1e-6)
+        val yaw   = normalizeYaw(Math.toDegrees(atan2(dz, dx)).toFloat() - 90f + archerAimJitterYaw)
+        val pitch = (-Math.toDegrees(atan2(dy, distXZ))).toFloat() + archerAimJitterPitch
+        return yaw to pitch.coerceIn(-90f, 90f)
+    }
+
+    private fun shouldApplyArcherAimlock(p: net.minecraft.client.player.LocalPlayer): Boolean {
+        if (!isArcherActionActive()) return false
+        if (archerReleasedThisCycle) return true
+        val held = p.mainHandItem.hoverName?.string?.noControlCodes?.lowercase() ?: ""
+        return p.isUsingItem && ("last breath" in held || "lastbreath" in held)
     }
 
     private fun applyArcherAimlock(yaw: Float, pitch: Float) {
         val p = mc.player ?: return
-
-        p.yRotO = p.yRot; p.xRotO = p.xRot
-        p.yHeadRotO = p.yHeadRot; p.yBodyRotO = p.yBodyRot
-        p.yRot = yaw; p.xRot = pitch
-        p.yHeadRot = yaw; p.yBodyRot = yaw
+        applyRotation(p, yaw, pitch)
     }
 
     private fun applyArcherAimlockSmooth(yaw: Float, pitch: Float) {
+        applyAimlockSmooth(yaw, pitch, archerRotateDurationTicks.toInt().coerceAtLeast(1))
+    }
+
+    /**
+     * Exponential-decay smooth rotation toward [yaw]/[pitch].
+     * Lower [rotateDurationTicks] = snappier. Runs every render frame.
+     */
+    private fun applyAimlockSmooth(yaw: Float, pitch: Float, rotateDurationTicks: Int) {
         val p = mc.player ?: return
-        val tickSetting = archerRotateDurationTicks.toInt().coerceAtLeast(1)
-        val speedScale = (40f / tickSetting).coerceIn(1f, 12f)
-        val maxYawStep = (3.5f * speedScale).coerceIn(6f, 28f)
-        val maxPitchStep = (2.8f * speedScale).coerceIn(5f, 24f)
+        val now = System.nanoTime()
+        val dt = if (archerLastAimNanos == 0L) 0.016
+        else ((now - archerLastAimNanos).toDouble() / 1_000_000_000.0).coerceIn(0.001, 0.05)
+        archerLastAimNanos = now
 
-        val yawDelta = wrapDegrees(yaw - p.yRot)
-        val pitchDelta = (pitch - p.xRot)
-        val yawStep = yawDelta.coerceIn(-maxYawStep, maxYawStep)
-        val pitchStep = pitchDelta.coerceIn(-maxPitchStep, maxPitchStep)
+        val responsePerSec = (60.0 / rotateDurationTicks.coerceAtLeast(1).toDouble()).coerceIn(2.0, 60.0)
+        val alpha = (1.0 - exp(-responsePerSec * dt)).toFloat().coerceIn(0.02f, 0.98f)
 
-        // High-rate, low-jitter smoothing.
-        val newYaw = p.yRot + yawStep * 0.92f
-        val newPitch = (p.xRot + pitchStep * 0.92f).coerceIn(-90f, 90f)
+        val newYaw   = p.yRot + wrapDegrees(yaw - p.yRot) * alpha
+        val newPitch = (p.xRot + (pitch - p.xRot) * alpha).coerceIn(-90f, 90f)
+        applyRotation(p, newYaw, newPitch)
+    }
 
-        p.yRotO = p.yRot; p.xRotO = p.xRot
+    private fun applyRotation(p: net.minecraft.client.player.LocalPlayer, yaw: Float, pitch: Float) {
+        p.yRotO = p.yRot;     p.xRotO   = p.xRot
         p.yHeadRotO = p.yHeadRot; p.yBodyRotO = p.yBodyRot
-        p.yRot = newYaw; p.xRot = newPitch
-        p.yHeadRot = newYaw; p.yBodyRot = newYaw
+        p.yRot = yaw;  p.xRot = pitch
+        p.yHeadRot = yaw; p.yBodyRot = yaw
     }
 
-    private fun isUnderArcherTarget(p: net.minecraft.client.player.LocalPlayer): Boolean {
-        return abs(p.x - archerAimX) <= 3.0 && abs(p.z - archerAimZ) <= 3.0
-    }
+    // ─── Input Helpers ────────────────────────────────────────────────────────
 
-    private fun isWithinStartZone(p: net.minecraft.client.player.LocalPlayer, x: Double, z: Double): Boolean {
-        // Start gate should be X/Z only; Y varies with edge blocks/slabs.
-        return abs(p.x - x) <= 3.5 && abs(p.z - z) <= 3.5
-    }
-
-    private fun RenderEvent.Extract.renderArcherWaypoint(name: String, x: Double, y: Double, z: Double, color: com.odtheking.odin.utils.Color) {
-        val box = AABB(x - 0.5, y, z - 0.5, x + 0.5, y + 1.8, z + 0.5)
-        drawStyledBox(box, color, 1, false) // 1 = Outline
-        val textPos = Vec3(x, y + 2.1, z)
-        drawText(name, textPos, 1.0f, false)
-    }
-
-    private fun setKeys(up: Boolean = false, down: Boolean = false, left: Boolean = false, right: Boolean = false, jump: Boolean = false) {
+    private fun setKeys(
+        up: Boolean = false, down: Boolean = false,
+        left: Boolean = false, right: Boolean = false,
+        jump: Boolean = false, sneak: Boolean = false
+    ) {
         mc.options.keyUp.setDown(up)
         mc.options.keyDown.setDown(down)
         mc.options.keyLeft.setDown(left)
         mc.options.keyRight.setDown(right)
         mc.options.keyJump.setDown(jump)
+        mc.options.keyShift.setDown(sneak)
     }
 
     private fun releaseKeys() = setKeys()
@@ -684,57 +575,65 @@ object AutoPy : Module(
         runCatching {
             val p = mc.player ?: return
             val conn = mc.connection ?: return
-            conn.send(
-                ServerboundPlayerActionPacket(
-                    ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM,
-                    BlockPos.ZERO,
-                    Direction.DOWN
-                )
-            )
-            archerDebugLog("release_use_item_packet_sent")
-            p.javaClass.methods.firstOrNull {
-                it.name.equals("releaseUsingItem", true) && it.parameterCount == 0
-            }?.invoke(p)
-            archerDebugLog("releaseUsingItem_called")
-            p.javaClass.methods.firstOrNull {
-                it.name.equals("stopUsingItem", true) && it.parameterCount == 0
-            }?.invoke(p)
-            archerDebugLog("stopUsingItem_called")
+            conn.send(ServerboundPlayerActionPacket(
+                ServerboundPlayerActionPacket.Action.RELEASE_USE_ITEM, BlockPos.ZERO, Direction.DOWN))
+            p.javaClass.methods.firstOrNull { it.name.equals("releaseUsingItem", true) && it.parameterCount == 0 }?.invoke(p)
+            p.javaClass.methods.firstOrNull { it.name.equals("stopUsingItem",    true) && it.parameterCount == 0 }?.invoke(p)
         }
     }
 
-    private fun pressDropKeyOnce() {
-        val key = (mc.options.keyDrop as? KeyMappingAccessor)?.boundKey ?: return
-        KeyMapping.set(key, true)
-        KeyMapping.click(key)
-        KeyMapping.set(key, false)
+    private fun isAnyUserInputActive(ignoreUseInput: Boolean = false): Boolean {
+        val windowHandle = mc.window.handle()
+        if (GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_LEFT)   == GLFW.GLFW_PRESS) return true
+        if (GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_MIDDLE) == GLFW.GLFW_PRESS) return true
+        if (!ignoreUseInput && GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) return true
+
+        val watched = listOf(
+            mc.options.keyUp, mc.options.keyDown, mc.options.keyLeft, mc.options.keyRight,
+            mc.options.keyJump, mc.options.keyShift, mc.options.keySprint,
+            mc.options.keyAttack, mc.options.keyUse
+        )
+        for (key in watched) {
+            if (ignoreUseInput && key == mc.options.keyUse) continue
+            val bound = (key as? KeyMappingAccessor)?.boundKey ?: continue
+            val code = bound.value
+            when {
+                code > 7  -> if (InputConstants.isKeyDown(mc.window, code)) return true
+                code >= 0 -> if (GLFW.glfwGetMouseButton(windowHandle, code) == GLFW.GLFW_PRESS) return true
+            }
+        }
+        return false
     }
+
+    private fun tryArcherLeftClick15Cps() {
+        val now = System.currentTimeMillis()
+        if (now < archerNextLeftClickAt) return
+        archerNextLeftClickAt = now + ((1000.0 / 15.0) + (Math.random() - 0.5) * 60.0).toLong().coerceAtLeast(1L)
+        leftClick()
+    }
+
+    // ─── Rotation Helpers ─────────────────────────────────────────────────────
 
     private fun beginSmoothRotate(targetYaw: Float, targetPitch: Float, durationMs: Long) {
         rotateThread?.interrupt()
         rotateThread = null
         val p = mc.player ?: return
-        val startYaw = normalizeYaw(p.yRot)
+        val startYaw   = normalizeYaw(p.yRot)
         val startPitch = normalizePitch(p.xRot)
-        val tYaw = normalizeYaw(targetYaw)
-        val tPitch = normalizePitch(targetPitch)
+        val tYaw       = normalizeYaw(targetYaw)
+        val tPitch     = normalizePitch(targetPitch)
         if (abs(wrapDegrees(tYaw - startYaw)) <= 1f && abs(tPitch - startPitch) <= 1f) return
+
         val startTime = System.currentTimeMillis()
         rotateThread = Thread {
             try {
                 while (true) {
-                    val progress = if (durationMs <= 0L) 1.0 else min((System.currentTimeMillis() - startTime).toDouble() / durationMs, 1.0)
-                    val eased = easeInOutCubic(progress.toFloat())
-                    val newYaw = interpolateYaw(startYaw, tYaw, eased)
+                    val progress = if (durationMs <= 0L) 1.0
+                    else ((System.currentTimeMillis() - startTime).toDouble() / durationMs).coerceAtMost(1.0)
+                    val eased    = easeInOutCubic(progress.toFloat())
+                    val newYaw   = interpolateYaw(startYaw, tYaw, eased)
                     val newPitch = lerp(startPitch, tPitch, eased).coerceIn(-90f, 90f)
-                    mc.execute {
-                        mc.player?.let {
-                            it.yRotO = it.yRot; it.xRotO = it.xRot
-                            it.yHeadRotO = it.yHeadRot; it.yBodyRotO = it.yBodyRot
-                            it.yRot = newYaw; it.xRot = newPitch
-                            it.yHeadRot = newYaw; it.yBodyRot = newYaw
-                        }
-                    }
+                    mc.execute { mc.player?.let { applyRotation(it, newYaw, newPitch) } }
                     if (progress >= 1.0) break
                     Thread.sleep(1)
                 }
@@ -742,107 +641,11 @@ object AutoPy : Module(
         }.also { it.isDaemon = true; it.start() }
     }
 
-    private fun findLeapHotbarSlot(): Int {
-        val p = mc.player ?: return -1
-        for (slot in 0..8) {
-            val name = p.inventory.getItem(slot).takeIf { !it.isEmpty }?.hoverName?.string?.lowercase() ?: continue
-            if ("infinileap" in name || "leap" in name) return slot
-        }
-        return -1
-    }
-
-    private fun findLastBreathHotbarSlot(): Int {
-        val p = mc.player ?: return -1
-        for (slot in 0..8) {
-            val stack = p.inventory.getItem(slot).takeIf { !it.isEmpty } ?: continue
-            val name = stack.hoverName?.string?.noControlCodes?.lowercase() ?: ""
-            if ("last breath" in name || "lastbreath" in name) return slot
-        }
-        return -1
-    }
-
-    private fun findTerminatorHotbarSlot(): Int {
-        val p = mc.player ?: return -1
-        for (slot in 0..8) {
-            val stack = p.inventory.getItem(slot).takeIf { !it.isEmpty } ?: continue
-            val name = stack.hoverName?.string?.noControlCodes?.lowercase() ?: ""
-            if ("terminator" in name) return slot
-        }
-        return -1
-    }
-
-    private fun isHeldBow(p: net.minecraft.client.player.LocalPlayer): Boolean {
-        val stack = p.mainHandItem
-        if (stack == null || stack.isEmpty) return false
-        val itemName = stack.item.toString().lowercase()
-        return "bow" in itemName
-    }
-
-    private fun setArcherSelectedSlot(p: net.minecraft.client.player.LocalPlayer, slot: Int) {
-        if (slot !in 0..8) return
-        if (p.inventory.selectedSlot != slot) {
-            p.inventory.setSelectedSlot(slot)
-        }
-        archerExpectedSlot = slot
-        archerSlotChangeGraceTicks = 2
-        archerLastSelectedSlot = p.inventory.selectedSlot
-    }
-
-    private fun isCrusherBlockPresentInRange(): Boolean {
-        val level = mc.level ?: return false
-        return (crusherYTop downTo crusherYBottom).any {
-            val b = level.getBlockState(BlockPos(crusherX, it, crusherZ)).block
-            b != Blocks.AIR && b != Blocks.CAVE_AIR && b != Blocks.VOID_AIR
-        }
-    }
-
-    private fun resetMovementState() {
-        phase = Phase.IDLE
-        ticksRemaining = 0
-        startedCycle = false
-        postStarted = false
-        rotateThread?.interrupt()
-        rotateThread = null
-    }
-
-    private fun resetAllState() {
-        resetMovementState()
-        pyTickTime = -1
-        pyTriggered = false
-        manualMode = false
-        manualLeftTicks = 0
-        manualPadMode = false
-        manualPadFallback = 12
-        postTicksRemaining = 0
-        crusherSeenTicksVar = 0
-        archerCharging = false
-        archerReleasedThisCycle = false
-        archerPostJumpDelayTicks = 0
-        archerJumpsRemaining = 0
-        archerJumpCooldownTicks = 0
-        archerAimlockCancelled = false
-        archerAimlockApplied = false
-        archerTerminatorSlot = -1
-        archerSwapToTerminatorPending = false
-        archerReleasedThisTick = false
-        archerDropDelayTicks = -1
-        archerDropTriggered = false
-        archerLastMouseX = Double.NaN
-        archerLastMouseY = Double.NaN
-        archerServerTicking = false
-        archerServerTicks = -1
-        archerServerWindowStarted = false
-        archerMissingLbLogged = false
-        archerLastSelectedSlot = -1
-        archerExpectedSlot = -1
-        archerSlotChangeGraceTicks = 0
-        debugSimulationActive = false
-    }
-
     private fun easeInOutCubic(t: Float): Float =
-        if (t < 0.5f) 4f * t * t * t else 1f - ((-2f * t + 2f).let { it * it * it } / 2f)
+        if (t < 0.5f) 4f * t * t * t
+        else 1f - (-2f * t + 2f).let { it * it * it } / 2f
 
-    private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
+    private fun lerp(a: Float, b: Float, t: Float) = a + (b - a) * t
 
     private fun interpolateYaw(from: Float, to: Float, t: Float): Float {
         var delta = (to - from) % 360f
@@ -858,6 +661,216 @@ object AutoPy : Module(
         return r
     }
 
-    private fun normalizeYaw(yaw: Float): Float = wrapDegrees(yaw)
-    private fun normalizePitch(pitch: Float): Float = pitch.coerceIn(-90f, 90f)
+    private fun normalizeYaw(yaw: Float) = wrapDegrees(yaw)
+    private fun normalizePitch(pitch: Float) = pitch.coerceIn(-90f, 90f)
+
+    // ─── Inventory Helpers ────────────────────────────────────────────────────
+
+    private fun findLeapHotbarSlot(): Int {
+        val p = mc.player ?: return -1
+        return (0..8).firstOrNull { slot ->
+            val name = p.inventory.getItem(slot).takeIf { !it.isEmpty }?.hoverName?.string?.lowercase() ?: return@firstOrNull false
+            "infinileap" in name || "leap" in name
+        } ?: -1
+    }
+
+    private fun findTerminatorHotbarSlot(): Int {
+        val p = mc.player ?: return -1
+        return (0..8).firstOrNull { slot ->
+            val name = p.inventory.getItem(slot).takeIf { !it.isEmpty }?.hoverName?.string?.noControlCodes?.lowercase() ?: return@firstOrNull false
+            "terminator" in name
+        } ?: -1
+    }
+
+    private fun setArcherSelectedSlot(p: net.minecraft.client.player.LocalPlayer, slot: Int) {
+        if (slot !in 0..8) return
+        if (p.inventory.selectedSlot != slot) p.inventory.setSelectedSlot(slot)
+        archerExpectedSlot = slot
+        archerSlotChangeGraceTicks = 2
+        archerLastSelectedSlot = p.inventory.selectedSlot
+    }
+
+    // ─── World Queries ────────────────────────────────────────────────────────
+
+    private fun isCrusherBlockPresent(): Boolean {
+        val level = mc.level ?: return false
+        return (CRUSHER_Y_TOP downTo CRUSHER_Y_BOTTOM).any { y ->
+            val b = level.getBlockState(BlockPos(CRUSHER_X, y, CRUSHER_Z)).block
+            b != Blocks.AIR && b != Blocks.CAVE_AIR && b != Blocks.VOID_AIR
+        }
+    }
+
+    private fun isUnderArcherTarget(p: net.minecraft.client.player.LocalPlayer) =
+        abs(p.x - ARCHER_AIM_POS.x) <= 5.0 && abs(p.z - ARCHER_AIM_POS.z) <= 5.0
+
+    private fun isLastBreathFullyCharged(p: net.minecraft.client.player.LocalPlayer): Boolean {
+        val held = p.mainHandItem.hoverName?.string?.noControlCodes?.lowercase() ?: ""
+        if (!p.isUsingItem || "last breath" !in held && "lastbreath" !in held) return false
+        val remaining = runCatching { p.useItemRemainingTicks }.getOrNull() ?: return false
+        return (72000 - remaining) >= ARCHER_MIN_CHARGE_TICKS
+    }
+
+    private fun RenderEvent.Extract.renderArcherWaypoint(
+        x: Double,
+        y: Double,
+        z: Double,
+        color: com.odtheking.odin.utils.Color,
+        filled: Boolean,
+    ) {
+        // drawStyledBox style codes: 0=Filled, 1=Outline, 2=Filled Outline
+        val renderStyle = if (filled) 2 else 1
+        drawStyledBox(AABB(x - 0.5, y, z - 0.5, x + 0.5, y + 1.8, z + 0.5), color, renderStyle, false)
+    }
+
+    // ─── State Management ─────────────────────────────────────────────────────
+
+    private fun resetMovementState() {
+        phase = Phase.IDLE
+        ticksRemaining = 0
+        startedCycle = false
+        postStarted = false
+        rotateThread?.interrupt()
+        rotateThread = null
+    }
+
+    private fun resetAllState() {
+        releaseKeys()
+        resetMovementState()
+        pyTickTime = -1
+        manualMode = false
+        manualLeftTicks = 0
+        manualPadMode = false
+        manualPadFallback = 12
+        postTicksRemaining = 0
+        crusherSeenTicks = 0
+        archerCharging = false
+        archerReleasedThisCycle = false
+        archerPostJumpDelayTicks = 0
+        archerJumpsRemaining = 0
+        archerJumpCooldownTicks = 0
+        archerAimlockCancelled = false
+        archerTerminatorSlot = -1
+        archerSwapToTerminatorPending = false
+        archerReleasedThisTick = false
+        archerServerTicking = false
+        archerServerTicks = -1
+        archerServerWindowStarted = false
+        archerFullyChargedLastTick = false
+        archerLastAimNanos = 0L
+        archerLastAimUpdateMs = 0L
+        archerLastSelectedSlot = -1
+        archerExpectedSlot = -1
+        archerSlotChangeGraceTicks = 0
+        archerSpamLeftClick = false
+        archerNextLeftClickAt = 0L
+        debugSimulationActive = false
+        archerAimJitterYaw = 0f
+        archerAimJitterPitch = 0f
+    }
+
+    private fun stopArcherCycle(reason: String) {
+        archerDebugLog("hard_stop reason=$reason")
+        mc.options.keySprint.setDown(false)
+        mc.options.keyAttack.setDown(false)
+        releaseKeys()
+        releaseUse()
+        resetAllState()
+    }
+
+    private fun resampleArcherAimJitter() {
+        val max = archerAimJitter.toFloat()
+        archerAimJitterYaw   = if (max <= 0f) 0f else (Math.random().toFloat() * 2f - 1f) * max
+        archerAimJitterPitch = if (max <= 0f) 0f else (Math.random().toFloat() * 2f - 1f) * max
+    }
+
+    // ─── Mode Helpers ─────────────────────────────────────────────────────────
+
+    private fun classModeLabel(): String = when (val v = classMode) {
+        is String -> v
+        is Number -> if (v.toInt() == 1) "Mage" else "Archer"
+        else -> v.toString()
+    }
+
+    private fun isArcherMode() = classModeLabel().equals("Archer", ignoreCase = true)
+    private fun isArcherCycleActive() = pyTickTime >= 0 || archerCharging || archerReleasedThisCycle || archerServerTicking
+    private fun isArcherActionActive() = archerServerWindowStarted || archerCharging || archerReleasedThisCycle || debugSimulationActive
+
+    private fun archerDebugLog(msg: String) {
+        if (archerDebug) modMessage("[AutoPY Archer Debug] $msg")
+    }
+
+    // ─── GUI Bridge ───────────────────────────────────────────────────────────
+
+    fun guiGetClassMode() = classModeLabel()
+    fun guiGetBossOnly() = bossOnly
+    fun guiSetBossOnly(v: Boolean) { bossOnly = v }
+    fun guiGetRightTicks() = rightTicks
+    fun guiSetRightTicks(v: Double) { rightTicks = v.coerceIn(1.0, 30.0) }
+    fun guiGetLeftTicks() = leftTicks
+    fun guiSetLeftTicks(v: Double) { leftTicks = v.coerceIn(1.0, 30.0) }
+    fun guiGetUseBlockStepOff() = useBlockStepOff
+    fun guiSetUseBlockStepOff(v: Boolean) { useBlockStepOff = v }
+    fun debugCurrentPyTick() = pyTickTime
+    fun debugCurrentClassMode() = classModeLabel()
+
+    /**
+     * Mirrors [withDependency] checks for [ClickGuiScreen], which uses reflection and bypasses
+     * Odin's dependency API.
+     */
+    fun guiIsSettingFieldVisible(fieldName: String): Boolean {
+        val base = fieldName.removeSuffix("\$delegate")
+        val archer = isArcherMode()
+        return when (base) {
+            "classMode", "bossOnly" -> true
+            "startAtTick", "rightTicks", "leftTicks", "postLeftTicks",
+            "useBlockStepOff", "rotateAfterStepOff" -> !archer
+            "holdFallbackTicks"    -> !archer && useBlockStepOff
+            "rotateDurationTicks"  -> !archer && rotateAfterStepOff
+            "archerRotateDurationTicks", "archerReleaseOffsetTicks", "archerAimJitter",
+            "archerDebug", "archerServerTickHud", "archerWaypoints", "archerAimWaypointColor", "archerAimWaypointFilled" -> archer
+            else -> true
+        }
+    }
+
+    // ─── Debug / Testing ──────────────────────────────────────────────────────
+
+    fun debugStartSimulation(startTick: Int = 95) {
+        releaseKeys(); releaseUse(); resetAllState()
+        debugSimulationActive = true
+        pyTickTime = startTick.coerceIn(0, 95)
+        if (isArcherMode()) resampleArcherAimJitter()
+        archerDebugLog("sim_start tick=$pyTickTime")
+    }
+
+    fun debugSetSimulationTick(tick: Int) {
+        pyTickTime = tick.coerceIn(-1, 95)
+        debugSimulationActive = pyTickTime >= 0
+        archerDebugLog("sim_set tick=$pyTickTime")
+    }
+
+    fun debugStopSimulation() {
+        releaseKeys(); releaseUse()
+        debugSimulationActive = false
+        resetAllState()
+        archerDebugLog("sim_stop")
+    }
+
+    fun runManualStrafe(right: Int, left: Int) {
+        releaseKeys(); resetMovementState()
+        manualPadMode = false
+        manualMode = true
+        manualLeftTicks = left.coerceAtLeast(1)
+        phase = Phase.RIGHT
+        ticksRemaining = right.coerceAtLeast(1)
+    }
+
+    fun runManualPadStrafe(right: Int, left: Int, fallbackHold: Int = 12) {
+        releaseKeys(); resetMovementState()
+        manualMode = false
+        manualPadMode = true
+        manualLeftTicks = left.coerceAtLeast(1)
+        manualPadFallback = fallbackHold.coerceAtLeast(1)
+        phase = Phase.RIGHT
+        ticksRemaining = right.coerceAtLeast(1)
+    }
 }
